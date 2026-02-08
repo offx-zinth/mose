@@ -1,0 +1,43 @@
+// Private 2-Person Chat App Schema
+// Messages and file metadata storage for real-time chat
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Message model for storing chat messages
+model Message {
+  id          String   @id @default(cuid())
+  senderId    String   // Identifier for sender (pr1 or pr2)
+  senderName  String?  // Name of the sender
+  content     String?  // Text content (null for file-only messages)
+  messageType String   @default("text") // "text", "image", "video", "document"
+  fileId      String?  // Reference to file if message contains file
+  createdAt   DateTime @default(now())
+  seen        Boolean  @default(false)
+
+  file        File?    @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([senderId])
+}
+
+// File model for storing file metadata
+model File {
+  id          String   @id @default(cuid())
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int      // Size in bytes
+  storagePath String   // Path where file is stored
+  uploadedAt  DateTime @default(now())
+
+  messages    Message[]
+
+  @@index([uploadedAt])
+}
