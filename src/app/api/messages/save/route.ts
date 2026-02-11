@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName } = await request.json();
+    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName, replyToId } = await request.json();
 
     if (!senderId || !messageType) {
       return NextResponse.json(
@@ -34,6 +34,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch reply information if replying
+    let replyData = null;
+    if (replyToId) {
+      const { data: replyMessage } = await supabase
+        .from('messages')
+        .select('id, content, sender_name')
+        .eq('id', replyToId)
+        .single();
+
+      if (replyMessage) {
+        replyData = {
+          replyToId: replyMessage.id,
+          replyToContent: replyMessage.content,
+          replyToSender: replyMessage.sender_name,
+        };
+      }
+    }
+
     // Insert message into Supabase
     const { data: message, error } = await supabase
       .from('messages')
@@ -46,7 +64,9 @@ export async function POST(request: NextRequest) {
         file_id: fileId || null,
         file_url: fileUrl || null,
         file_name: fileName || null,
+        reply_to_id: replyToId || null,
         seen: false,
+        is_edited: false,
       })
       .select()
       .single();
@@ -73,6 +93,10 @@ export async function POST(request: NextRequest) {
         fileName: message.file_name,
         createdAt: message.created_at,
         seen: message.seen,
+        replyToId: message.reply_to_id,
+        ...replyData,
+        isEdited: message.is_edited,
+        editedAt: message.edited_at,
       },
     });
   } catch (error) {

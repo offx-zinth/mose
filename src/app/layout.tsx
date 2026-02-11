@@ -14,22 +14,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Private Chat - Secure 2-Person Communication",
-  description: "A secure, private chat application for exclusive communication between two people with CAPTCHA-based access control.",
-  keywords: ["private chat", "secure messaging", "real-time chat", "private communication"],
-  authors: [{ name: "Private Chat Team" }],
+  title: "Wikipedia - The Free Encyclopedia",
+  description: "Wikipedia, the free encyclopedia that anyone can edit.",
+  keywords: ["Wikipedia", "encyclopedia", "free knowledge"],
+  authors: [{ name: "Wikipedia" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "Private Chat - Secure 2-Person Communication",
-    description: "A secure, private chat application for exclusive communication",
+    title: "Wikipedia - The Free Encyclopedia",
+    description: "The free encyclopedia that anyone can edit",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Private Chat",
-    description: "Secure 2-Person Communication",
+    title: "Wikipedia - The Free Encyclopedia",
+    description: "The free encyclopedia that anyone can edit",
   },
 };
 
