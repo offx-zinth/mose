@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,20 +13,19 @@ export async function POST(request: NextRequest) {
     }
 
     // First, verify the message belongs to the user
-    const { data: message, error: fetchError } = await supabase
-      .from('messages')
-      .select('sender_id')
-      .eq('id', messageId)
-      .single();
+    const message = await db.message.findUnique({
+      where: { id: messageId },
+      select: { senderId: true },
+    });
 
-    if (fetchError || !message) {
+    if (!message) {
       return NextResponse.json(
         { success: false, error: 'Message not found' },
         { status: 404 }
       );
     }
 
-    if (message.sender_id !== userId) {
+    if (message.senderId !== userId) {
       return NextResponse.json(
         { success: false, error: 'You can only edit your own messages' },
         { status: 403 }
@@ -34,22 +33,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the message
-    const { error: updateError } = await supabase
-      .from('messages')
-      .update({
+    await db.message.update({
+      where: { id: messageId },
+      data: {
         content: newContent,
-        edited_at: new Date().toISOString(),
-        is_edited: true,
-      })
-      .eq('id', messageId);
-
-    if (updateError) {
-      console.error('Update error:', updateError);
-      return NextResponse.json(
-        { success: false, error: 'Failed to update message' },
-        { status: 500 }
-      );
-    }
+        editedAt: new Date(),
+        isEdited: true,
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

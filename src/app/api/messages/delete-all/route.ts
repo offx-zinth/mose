@@ -1,31 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
     const { userId, action } = await request.json();
 
-    if (!userId) {
+    if (!userId || !action) {
       return NextResponse.json(
-        { success: false, error: 'Missing user ID' },
+        { success: false, error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
-    let result;
-
     if (action === 'mine') {
-      // Delete only user's own messages
-      result = await supabase
-        .from('messages')
-        .delete()
-        .eq('sender_id', userId);
+      // Get user's message IDs
+      const userMessages = await db.message.findMany({
+        where: { senderId: userId },
+        select: { id: true },
+      });
+
+      const messageIds = userMessages.map(m => m.id);
+
+      // Delete reactions for these messages
+      await db.reaction.deleteMany({
+        where: { messageId: { in: messageIds } },
+      });
+
+      // Delete user's messages
+      await db.message.deleteMany({
+        where: { senderId: userId },
+      });
     } else if (action === 'all') {
-      // Delete all messages (for both users)
-      result = await supabase
-        .from('messages')
-        .delete()
-        .gte('id', '00000000-0000-0000-0000-000000000000');
+      // Delete all reactions
+      await db.reaction.deleteMany({});
+
+      // Delete all messages
+      await db.message.deleteMany({});
     } else {
       return NextResponse.json(
         { success: false, error: 'Invalid action' },
@@ -33,19 +43,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { error } = result;
-
-    if (error) {
-      console.error('Delete all error:', error);
-      return NextResponse.json(
-        { success: false, error: 'Failed to delete messages' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true, action });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Delete all messages error:', error);
+    console.error('Delete messages error:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to delete messages' },
       { status: 500 }

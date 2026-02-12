@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,62 +13,40 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch messages from Supabase
-    const { data: messages, error } = await supabase
-      .from('messages')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch messages' },
-        { status: 500 }
-      );
-    }
-
-    // Fetch reply messages
-    const replyToIds = messages
-      .map(msg => msg.reply_to_id)
-      .filter((id): id is string => id !== null);
-
-    let replyToMessages: any[] = [];
-    if (replyToIds.length > 0) {
-      const { data: replies } = await supabase
-        .from('messages')
-        .select('id, sender_name, content')
-        .in('id', replyToIds);
-      replyToMessages = replies || [];
-    }
-
-    // Create a map for quick lookup
-    const replyMap = new Map(
-      replyToMessages.map(r => [r.id, { content: r.content, sender: r.sender_name }])
-    );
+    // Fetch messages from database
+    const messages = await db.message.findMany({
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        reactions: true,
+      },
+    });
 
     // Transform data to match our interface
-    const transformedMessages = messages.map(msg => {
-      const replyInfo = replyMap.get(msg.reply_to_id);
-      return {
-        id: msg.id,
-        senderId: msg.sender_id,
-        senderName: msg.sender_name,
-        senderEmoji: msg.sender_emoji,
-        content: msg.content,
-        messageType: msg.message_type,
-        fileId: msg.file_id,
-        fileUrl: msg.file_url,
-        fileName: msg.file_name,
-        createdAt: msg.created_at,
-        seen: msg.seen,
-        replyToId: msg.reply_to_id,
-        replyToContent: replyInfo?.content || null,
-        replyToSender: replyInfo?.sender || null,
-        isEdited: msg.is_edited || false,
-        editedAt: msg.edited_at || null,
-      };
-    });
+    const transformedMessages = messages.map(msg => ({
+      id: msg.id,
+      senderId: msg.senderId,
+      senderName: msg.senderName,
+      senderEmoji: msg.senderEmoji,
+      content: msg.content,
+      messageType: msg.messageType,
+      fileId: msg.fileId,
+      fileUrl: msg.fileUrl,
+      fileName: msg.fileName,
+      createdAt: msg.createdAt.toISOString(),
+      seen: msg.seen,
+      replyToId: msg.replyToId,
+      isEdited: msg.isEdited,
+      editedAt: msg.editedAt?.toISOString() || null,
+      voiceDuration: msg.voiceDuration,
+      reactions: msg.reactions.map(r => ({
+        id: r.id,
+        messageId: r.messageId,
+        userId: r.userId,
+        emoji: r.emoji,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    }));
 
     // Return in chronological order
     return NextResponse.json({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,39 +13,34 @@ export async function POST(request: NextRequest) {
     }
 
     // First, verify the message belongs to the user
-    const { data: message, error: fetchError } = await supabase
-      .from('messages')
-      .select('sender_id')
-      .eq('id', messageId)
-      .single();
+    const message = await db.message.findUnique({
+      where: { id: messageId },
+      select: { senderId: true },
+    });
 
-    if (fetchError || !message) {
+    if (!message) {
       return NextResponse.json(
         { success: false, error: 'Message not found' },
         { status: 404 }
       );
     }
 
-    if (message.sender_id !== userId) {
+    if (message.senderId !== userId) {
       return NextResponse.json(
         { success: false, error: 'You can only delete your own messages' },
         { status: 403 }
       );
     }
 
-    // Delete the message
-    const { error: deleteError } = await supabase
-      .from('messages')
-      .delete()
-      .eq('id', messageId);
+    // Delete reactions first
+    await db.reaction.deleteMany({
+      where: { messageId },
+    });
 
-    if (deleteError) {
-      console.error('Delete error:', deleteError);
-      return NextResponse.json(
-        { success: false, error: 'Failed to delete message' },
-        { status: 500 }
-      );
-    }
+    // Delete the message
+    await db.message.delete({
+      where: { id: messageId },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName, replyToId } = await request.json();
+    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName, replyToId, voiceDuration } = await request.json();
 
     if (!senderId || !messageType) {
       return NextResponse.json(
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validTypes = ['text', 'image', 'video', 'document'];
+    const validTypes = ['text', 'image', 'video', 'document', 'voice'];
     if (!validTypes.includes(messageType)) {
       return NextResponse.json(
         { error: 'Invalid message type' },
@@ -27,76 +27,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (['image', 'video', 'document'].includes(messageType) && !fileId) {
-      return NextResponse.json(
-        { error: 'File ID is required for file messages' },
-        { status: 400 }
-      );
-    }
-
-    // Fetch reply information if replying
-    let replyData = null;
-    if (replyToId) {
-      const { data: replyMessage } = await supabase
-        .from('messages')
-        .select('id, content, sender_name')
-        .eq('id', replyToId)
-        .single();
-
-      if (replyMessage) {
-        replyData = {
-          replyToId: replyMessage.id,
-          replyToContent: replyMessage.content,
-          replyToSender: replyMessage.sender_name,
-        };
-      }
-    }
-
-    // Insert message into Supabase
-    const { data: message, error } = await supabase
-      .from('messages')
-      .insert({
-        sender_id: senderId,
-        sender_name: senderName,
-        sender_emoji: senderEmoji,
+    // Insert message into database
+    const message = await db.message.create({
+      data: {
+        senderId,
+        senderName,
+        senderEmoji,
         content: content || null,
-        message_type: messageType,
-        file_id: fileId || null,
-        file_url: fileUrl || null,
-        file_name: fileName || null,
-        reply_to_id: replyToId || null,
+        messageType,
+        fileId: fileId || null,
+        fileUrl: fileUrl || null,
+        fileName: fileName || null,
+        replyToId: replyToId || null,
+        voiceDuration: voiceDuration || null,
         seen: false,
-        is_edited: false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Failed to save message' },
-        { status: 500 }
-      );
-    }
+        isEdited: false,
+      },
+      include: {
+        reactions: true,
+      },
+    });
 
     return NextResponse.json({
       success: true,
       message: {
         id: message.id,
-        senderId: message.sender_id,
-        senderName: message.sender_name,
-        senderEmoji: message.sender_emoji,
+        senderId: message.senderId,
+        senderName: message.senderName,
+        senderEmoji: message.senderEmoji,
         content: message.content,
-        messageType: message.message_type,
-        fileId: message.file_id,
-        fileUrl: message.file_url,
-        fileName: message.file_name,
-        createdAt: message.created_at,
+        messageType: message.messageType,
+        fileId: message.fileId,
+        fileUrl: message.fileUrl,
+        fileName: message.fileName,
+        createdAt: message.createdAt.toISOString(),
         seen: message.seen,
-        replyToId: message.reply_to_id,
-        ...replyData,
-        isEdited: message.is_edited,
-        editedAt: message.edited_at,
+        replyToId: message.replyToId,
+        isEdited: message.isEdited,
+        editedAt: message.editedAt?.toISOString() || null,
+        voiceDuration: message.voiceDuration,
+        reactions: [],
       },
     });
   } catch (error) {

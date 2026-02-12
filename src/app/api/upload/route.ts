@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
+import { writeFile, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
+import path from 'path';
 
 const FILE_CONFIG = {
   image: {
@@ -21,16 +24,21 @@ const FILE_CONFIG = {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ],
   },
+  audio: {
+    maxSize: 25 * 1024 * 1024,
+    allowedTypes: ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav'],
+  },
 };
 
-function getFileType(mimeType: string): 'image' | 'video' | 'document' | null {
+function getFileType(mimeType: string): 'image' | 'video' | 'document' | 'audio' | null {
   if (FILE_CONFIG.image.allowedTypes.includes(mimeType)) return 'image';
   if (FILE_CONFIG.video.allowedTypes.includes(mimeType)) return 'video';
   if (FILE_CONFIG.document.allowedTypes.includes(mimeType)) return 'document';
+  if (FILE_CONFIG.audio.allowedTypes.includes(mimeType)) return 'audio';
   return null;
 }
 
-function validateFile(file: File, fileType: 'image' | 'video' | 'document'): { valid: boolean; error?: string } {
+function validateFile(file: File, fileType: 'image' | 'video' | 'document' | 'audio'): { valid: boolean; error?: string } {
   const config = FILE_CONFIG[fileType];
 
   if (file.size > config.maxSize) {
@@ -91,41 +99,39 @@ export async function POST(request: NextRequest) {
     }
 
     const uniqueFilename = generateUniqueFilename(file.name);
-    const filePath = `chat-files/${uniqueFilename}`;
 
-    // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('chat-files')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error('Supabase upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload file' },
-        { status: 500 }
-      );
+    // Ensure upload directory exists
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+    if (!existsSync(uploadDir)) {
+      await mkdir(uploadDir, { recursive: true });
     }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('chat-files')
-      .getPublicUrl(filePath);
+    // Write file to public/uploads
+    const filePath = path.join(uploadDir, uniqueFilename);
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    await writeFile(filePath, buffer);
 
-    // Generate a unique ID for the file
-    const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-    return NextResponse.json({
-      success: true,
-      file: {
-        id: fileId,
+    // Save file metadata to database
+    const fileRecord = await db.file.create({
+      data: {
         filename: uniqueFilename,
         originalName: file.name,
         mimeType: file.type,
         size: file.size,
-        storagePath: urlData.publicUrl,
+        storagePath: `/uploads/${uniqueFilename}`,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      file: {
+        id: fileRecord.id,
+        filename: fileRecord.filename,
+        originalName: fileRecord.originalName,
+        mimeType: fileRecord.mimeType,
+        size: fileRecord.size,
+        storagePath: fileRecord.storagePath,
       },
     });
   } catch (error) {

@@ -12,16 +12,26 @@ datasource db {
 
 // Message model for storing chat messages
 model Message {
-  id          String   @id @default(cuid())
-  senderId    String   // Identifier for sender (pr1 or pr2)
-  senderName  String?  // Name of the sender
-  content     String?  // Text content (null for file-only messages)
-  messageType String   @default("text") // "text", "image", "video", "document"
-  fileId      String?  // Reference to file if message contains file
-  createdAt   DateTime @default(now())
-  seen        Boolean  @default(false)
+  id            String    @id @default(cuid())
+  senderId      String    // Identifier for sender (pr1 or pr2)
+  senderName    String?   // Name of the sender
+  senderEmoji   String?   // Emoji avatar of sender
+  content       String?   // Text content (null for file-only messages)
+  messageType   String    @default("text") // "text", "image", "video", "document", "voice"
+  fileId        String?   // Reference to file if message contains file
+  fileUrl       String?   // URL path for file
+  fileName      String?   // Original filename
+  replyToId     String?   // ID of message being replied to
+  isEdited      Boolean   @default(false)
+  editedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  seen          Boolean   @default(false)
+  voiceDuration Int?      // Duration in seconds for voice notes
 
-  file        File?    @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  file          File?          @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  reactions     Reaction[]
+  replyTo       Message?       @relation("ReplyRelation", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       Message[]      @relation("ReplyRelation")
 
   @@index([createdAt])
   @@index([senderId])
@@ -29,15 +39,60 @@ model Message {
 
 // File model for storing file metadata
 model File {
-  id          String   @id @default(cuid())
-  filename    String
+  id           String    @id @default(cuid())
+  filename     String
   originalName String
-  mimeType    String
-  size        Int      // Size in bytes
-  storagePath String   // Path where file is stored
-  uploadedAt  DateTime @default(now())
+  mimeType     String
+  size         Int       // Size in bytes
+  storagePath  String    // Path where file is stored
+  uploadedAt   DateTime  @default(now())
 
-  messages    Message[]
+  messages     Message[]
 
   @@index([uploadedAt])
+}
+
+// Reaction model for emoji reactions to messages
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId]) // One reaction per user per message
+  @@index([messageId])
+}
+
+// Call model for storing call metadata
+model Call {
+  id           String   @id @default(cuid())
+  callerId     String
+  callerName   String?
+  receiverId   String?
+  callType     String   // "voice", "video", "screen"
+  status       String   // "missed", "answered", "declined", "ended"
+  startedAt    DateTime?
+  endedAt      DateTime?
+  duration     Int?     // Duration in seconds
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// WatchTogether session for shared viewing
+model WatchTogether {
+  id           String   @id @default(cuid())
+  hostId       String
+  hostName     String?
+  videoUrl     String
+  status       String   @default("active") // "active", "ended"
+  currentTime  Float    @default(0)
+  isPlaying    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  endedAt      DateTime?
+
+  @@index([createdAt])
 }
