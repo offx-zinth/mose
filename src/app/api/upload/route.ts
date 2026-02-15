@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { writeFile, mkdir } from 'fs/promises';
+import { supabase } from '@/lib/supabase';
+import { writeFile, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
@@ -29,6 +30,8 @@ const FILE_CONFIG = {
     allowedTypes: ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav'],
   },
 };
+
+const BUCKET_NAME = 'chat-files';
 
 function getFileType(mimeType: string): 'image' | 'video' | 'document' | 'audio' | null {
   if (FILE_CONFIG.image.allowedTypes.includes(mimeType)) return 'image';
@@ -71,6 +74,8 @@ function generateUniqueFilename(originalName: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  let tempFilePath: string | null = null;
+  
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -99,18 +104,48 @@ export async function POST(request: NextRequest) {
     }
 
     const uniqueFilename = generateUniqueFilename(file.name);
-
-    // Ensure upload directory exists
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true });
-    }
-
-    // Write file to public/uploads
-    const filePath = path.join(uploadDir, uniqueFilename);
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    await writeFile(filePath, buffer);
+
+    // Try to upload to Supabase first
+    let storagePath: string;
+    let publicUrl: string;
+
+    try {
+      const { data, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(uniqueFilename, buffer, {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (error) {
+        console.log('Supabase upload failed, falling back to local storage:', error.message);
+        throw error;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(uniqueFilename);
+
+      storagePath = urlData.publicUrl;
+      publicUrl = urlData.publicUrl;
+    } catch (supabaseError) {
+      // Fallback to local storage
+      console.log('Using local storage as fallback');
+      
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!existsSync(uploadDir)) {
+        await mkdir(uploadDir, { recursive: true });
+      }
+
+      const filePath = path.join(uploadDir, uniqueFilename);
+      await writeFile(filePath, buffer);
+      
+      storagePath = `/uploads/${uniqueFilename}`;
+      publicUrl = storagePath;
+    }
 
     // Save file metadata to database
     const fileRecord = await db.file.create({
@@ -119,7 +154,7 @@ export async function POST(request: NextRequest) {
         originalName: file.name,
         mimeType: file.type,
         size: file.size,
-        storagePath: `/uploads/${uniqueFilename}`,
+        storagePath: storagePath,
       },
     });
 
@@ -140,5 +175,14 @@ export async function POST(request: NextRequest) {
       { error: 'Failed to upload file' },
       { status: 500 }
     );
+  } finally {
+    // Clean up temp file if it exists
+    if (tempFilePath && existsSync(tempFilePath)) {
+      try {
+        await unlink(tempFilePath);
+      } catch (e) {
+        console.error('Failed to clean up temp file:', e);
+      }
+    }
   }
 }

@@ -20,7 +20,6 @@ interface ChatMessage {
   replyToEmoji?: string | null;
   isEdited?: boolean;
   editedAt?: string | null;
-  reactions?: Reaction[];
   file?: {
     id: string;
     filename: string;
@@ -31,15 +30,6 @@ interface ChatMessage {
   };
 }
 
-// Reaction interface
-interface Reaction {
-  id: string;
-  messageId: string;
-  userId: string;
-  emoji: string;
-  createdAt: string;
-}
-
 // User info interface
 interface UserInfo {
   userId: string;
@@ -47,24 +37,13 @@ interface UserInfo {
   socketId: string;
 }
 
-// Call signaling interface
+// Call signal interface for WebRTC
 interface CallSignal {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-answer' | 'call-decline' | 'call-end' | 'screen-share-start' | 'screen-share-stop';
+  type: 'call-request' | 'call-accept' | 'call-reject' | 'call-end' | 'signal';
   from: string;
-  to: string;
-  callType?: 'voice' | 'video' | 'screen';
-  data?: any;
-}
-
-// Watch together interface
-interface WatchTogetherSignal {
-  type: 'play' | 'pause' | 'seek' | 'sync' | 'join' | 'leave' | 'url-change';
-  from: string;
-  data: {
-    currentTime?: number;
-    videoUrl?: string;
-    isPlaying?: boolean;
-  };
+  to?: string;
+  callType?: 'voice' | 'video';
+  signal?: any;
 }
 
 // Define message types for Socket.IO events
@@ -73,12 +52,10 @@ interface ServerToClientEvents {
   message_seen: (messageId: string) => void;
   message_updated: (message: Partial<ChatMessage> & { id: string }) => void;
   message_deleted: (messageId: string) => void;
-  message_reaction: (data: { messageId: string; reactions: Reaction[] }) => void;
   user_joined: (data: { userId: string; userName: string }) => void;
   user_left: (data: { userId: string; userName: string }) => void;
   online_users: (users: { userId: string; userName: string }[]) => void;
   call_signal: (signal: CallSignal) => void;
-  watch_together: (signal: WatchTogetherSignal) => void;
   error: (error: string) => void;
 }
 
@@ -88,9 +65,7 @@ interface ClientToServerEvents {
   join_chat: (data: { userId: string; userName: string }) => void;
   edit_message: (data: { messageId: string; content: string }) => void;
   delete_message: (messageId: string) => void;
-  react_message: (data: { messageId: string; emoji: string; userId: string }) => void;
   call_signal: (signal: CallSignal) => void;
-  watch_together: (signal: WatchTogetherSignal) => void;
 }
 
 // Create Socket.IO server
@@ -121,6 +96,13 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Chat room is full (max 2 users)');
       socket.disconnect();
       return;
+    }
+
+    // If user already connected with different socket, disconnect old one
+    const existingSocketId = userSocketMap.get(userId);
+    if (existingSocketId && existingSocketId !== socket.id) {
+      io.to(existingSocketId).emit('error', 'Connected from another location');
+      connectedUsers.delete(existingSocketId);
     }
 
     connectedUsers.set(socket.id, { userId, userName, socketId: socket.id });
@@ -164,8 +146,10 @@ io.on('connection', (socket) => {
       createdAt: new Date().toISOString(),
       seen: false,
       replyToId: messageData.replyToId,
+      replyToContent: messageData.replyToContent,
+      replyToSender: messageData.replyToSender,
+      replyToEmoji: messageData.replyToEmoji,
       file: messageData.file,
-      reactions: [],
     };
 
     console.log(`Message from ${userInfo.userName}: ${message.content || '(file message)'}`);
@@ -204,49 +188,40 @@ io.on('connection', (socket) => {
     io.emit('message_deleted', messageId);
   });
 
-  // Handle message reactions
-  socket.on('react_message', (data) => {
+  // Handle WebRTC Call signaling
+  socket.on('call_signal', (signal: CallSignal) => {
     const userInfo = connectedUsers.get(socket.id);
-    if (!userInfo) return;
+    if (!userInfo) {
+      console.log('Call signal: User not found');
+      return;
+    }
 
-    console.log(`Reaction ${data.emoji} on message ${data.messageId} by ${userInfo.userName}`);
-    // Broadcast reaction update to all clients
-    // Note: The actual reaction list will be managed by the database
-    io.emit('message_reaction', {
-      messageId: data.messageId,
-      reactions: [], // This will be populated from the database
-    });
-  });
+    console.log(`Call signal ${signal.type} from ${userInfo.userName} (${userInfo.userId})`);
 
-  // Handle call signaling (WebRTC)
-  socket.on('call_signal', (signal) => {
-    const userInfo = connectedUsers.get(socket.id);
-    if (!userInfo) return;
-
-    console.log(`Call signal ${signal.type} from ${userInfo.userName}`);
-
-    // Forward the signal to the target user
-    const targetSocketId = userSocketMap.get(signal.to);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call_signal', {
+    // Forward signal to target user
+    if (signal.to) {
+      const targetSocketId = userSocketMap.get(signal.to);
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('call_signal', {
+          ...signal,
+          from: userInfo.userId,
+        });
+        console.log(`Call signal ${signal.type} forwarded to ${signal.to}`);
+      } else {
+        console.log(`Target user ${signal.to} not found for call signal`);
+        // Notify caller that target is not available
+        socket.emit('call_signal', {
+          type: 'call-reject',
+          from: signal.to,
+        });
+      }
+    } else {
+      // Broadcast to all other users (for call requests without specific target)
+      socket.broadcast.emit('call_signal', {
         ...signal,
         from: userInfo.userId,
       });
     }
-  });
-
-  // Handle watch together signaling
-  socket.on('watch_together', (signal) => {
-    const userInfo = connectedUsers.get(socket.id);
-    if (!userInfo) return;
-
-    console.log(`Watch together ${signal.type} from ${userInfo.userName}`);
-
-    // Broadcast to all other users
-    socket.broadcast.emit('watch_together', {
-      ...signal,
-      from: userInfo.userId,
-    });
   });
 
   // Handle disconnection

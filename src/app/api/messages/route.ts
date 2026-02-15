@@ -19,6 +19,14 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' },
       include: {
         reactions: true,
+        replyTo: {
+          select: {
+            id: true,
+            content: true,
+            senderName: true,
+            senderEmoji: true,
+          },
+        },
       },
     });
 
@@ -36,6 +44,9 @@ export async function GET(request: NextRequest) {
       createdAt: msg.createdAt.toISOString(),
       seen: msg.seen,
       replyToId: msg.replyToId,
+      replyToContent: msg.replyTo?.content || null,
+      replyToSender: msg.replyTo?.senderName || null,
+      replyToEmoji: msg.replyTo?.senderEmoji || null,
       isEdited: msg.isEdited,
       editedAt: msg.editedAt?.toISOString() || null,
       voiceDuration: msg.voiceDuration,

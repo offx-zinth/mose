@@ -27,6 +27,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch parent message if replying
+    let parentMessage = null;
+    if (replyToId) {
+      parentMessage = await db.message.findUnique({
+        where: { id: replyToId },
+        select: { content: true, senderName: true, senderEmoji: true },
+      });
+    }
+
     // Insert message into database
     const message = await db.message.create({
       data: {
@@ -63,6 +72,9 @@ export async function POST(request: NextRequest) {
         createdAt: message.createdAt.toISOString(),
         seen: message.seen,
         replyToId: message.replyToId,
+        replyToContent: parentMessage?.content || null,
+        replyToSender: parentMessage?.senderName || null,
+        replyToEmoji: parentMessage?.senderEmoji || null,
         isEdited: message.isEdited,
         editedAt: message.editedAt?.toISOString() || null,
         voiceDuration: message.voiceDuration,

@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
+import SimplePeer from 'simple-peer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import {
-  Send, FileText, Upload, LogOut, MoreVertical, Heart, Sparkles, AlertTriangle,
-  Trash2, Smile, Edit2, Reply, Phone, Video, Users, X, Mic,
-  MicOff, PhoneOff, Monitor, Tv
+  Send, FileText, Upload, LogOut, MoreVertical, Heart,
+  Trash2, Smile, Edit2, Reply, Phone, Video, PhoneOff,
+  Mic, MicOff, VideoOff, Monitor, Minimize2, Maximize2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -35,14 +36,6 @@ interface UserInfo {
   emoji: string;
 }
 
-interface Reaction {
-  id: string;
-  messageId: string;
-  userId: string;
-  emoji: string;
-  createdAt: string;
-}
-
 interface Message {
   id: string;
   senderId: string;
@@ -62,7 +55,6 @@ interface Message {
   isEdited?: boolean;
   editedAt?: string | null;
   voiceDuration?: number;
-  reactions?: Reaction[];
 }
 
 interface FileMetadata {
@@ -80,216 +72,34 @@ interface EmojiCategory {
   emojis: string[];
 }
 
+interface CallSignal {
+  type: 'call-request' | 'call-accept' | 'call-reject' | 'call-end' | 'signal';
+  from: string;
+  to?: string;
+  callType?: 'voice' | 'video';
+  signal?: any;
+}
+
 const FLOATING_EMOJIS = ['💗', '🎀', '✨', '🌸', '🌷', '🫧'];
-const QUICK_REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
-// Unicode 17 Emojis organized by categories
+
 const EMOJI_CATEGORIES: EmojiCategory[] = [
   {
     name: 'Smileys',
     icon: '😊',
-    emojis: [
-      '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃',
-      '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙',
-      '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
-      '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
-      '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧',
-      '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐',
-      '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦',
-      '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞',
-      '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿',
-      '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖',
-    ],
+    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔'],
   },
   {
     name: 'Love',
     icon: '❤️',
-    emojis: [
-      '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
-      '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '☮️',
-      '✝️', '☪️', '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐',
-      '⛎', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐',
-      '♑', '♒', '♓', '🆔', '⚛️', '🉑', '☢️', '☣️', '📴', '📳',
-      '🈶', '🈚', '🈸', '🈺', '🈷️', '✴️', '🆚', '💮', '🉐', '㊙️',
-      '㊗️', '🈴', '🈵', '🈹', '🈲', '🅰️', '🅱️', '🆎', '🆑', '🅾️',
-      '🆘', '❌', '⭕', '🛑', '⛔', '📛', '🚫', '💯', '💢', '♨️',
-      '🚷', '🚯', '🚳', '🚱', '🔞', '📵', '🚭', '❗', '❕', '❓',
-      '❔', '‼️', '⁉️', '🔅', '🔆', '〽️', '⚠️', '🚸', '🔱', '⚜️',
-      '🔰', '♻️', '✅', '🈯️', '💹', '❇️', '✳️', '❎', '🌐', '💠',
-      'Ⓜ️', '🌀', '💤', '🏧', '🚾', '♿', '🅿️', '🈳', '🈂️', '🛂',
-      '🛃', '🛄', '🛅', '🚹', '🚺', '🚼', '⚧️', '🚻', '🚮', '🎦',
-      '📶', '🈁', '🔣', 'ℹ️', '🔤', '🔡', '🔠', '🆖', '🆗', '🆙',
-      '🆒', '🆕', '🆓', '0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣',
-      '7️⃣', '8️⃣', '9️⃣', '🔟', '🔢', '#️⃣', '*️⃣', '⏏️', '▶️', '⏸️',
-      '⏯️', '⏹️', '⏺️', '⏭️', '⏮️', '⏩', '⏪', '⏫', '⏬', '◀️',
-      '🔼', '🔽', '➡️', '⬅️', '⬆️', '⬇️', '↗️', '↘️', '↙️', '↖️',
-      '↕️', '↔️', '↪️', '↩️', '⤴️', '⤵️', '🔀', '🔁', '🔂', '🔄',
-      '🔃', '🎵', '🎶', '➕', '➖', '➗', '✖️', '🟰', '♾️', '💲',
-      '💱', '™️', '©️', '®️', '〰️', '➰', '➿', '🔚', '🔙', '🔛',
-      '🔝', '🔜', '✔️', '☑️', '🔘', '🔴', '🟠', '🟡', '🟢', '🔵',
-      '🟣', '⚫', '⚪', '🟤', '🔺', '🔻', '🔸', '🔹', '🔶', '🔷',
-      '🔳', '🔲', '▪️', '▫️', '◾', '◽', '◼️', '◻️', '🟥', '🟧',
-      '🟨', '🟩', '🟦', '🟪', '⬛', '⬜', '🟫', '🔈', '🔇', '🔉',
-      '🔊', '🔔', '🔕', '📣', '📢', '👁️‍🗨️', '💬', '💭', '🗯️', '♠️',
-      '♣️', '♥️', '♦️', '🃏', '🎴', '🀄', '🕐', '🕑', '🕒', '🕓',
-      '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚', '🕛', '🕜', '🕝',
-      '🕞', '🕟', '🕠', '🕡', '🕢', '🕣', '🕤', '🕥', '🕦', '🕧',
-    ],
+    emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '❤️‍🔥', '❤️‍🩹'],
   },
   {
     name: 'People',
     icon: '👋',
-    emojis: [
-      '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞',
-      '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍',
-      '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝',
-      '🙏', '✍️', '💅', '🤳', '💪', '🦵', '🦶', '👂', '🦻', '👃',
-      '🧠', '🦷', '🦴', '👀', '👁️', '👅', '👄', '💋', '🩸', '👶',
-      '🧒', '👦', '👧', '🧑', '👱', '👨', '🧔', '👩', '🧓', '👴',
-      '👵', '🙍', '🙎', '🙅', '🙆', '💁', '🙋', '🙇', '🤦', '🤷',
-      '👨‍⚕️', '👩‍⚕️', '👨‍🎓', '👩‍🎓', '👨‍🏫', '👩‍🏫', '👨‍⚖️', '👩‍⚖️', '👨‍🌾', '👩‍🌾',
-      '👨‍🍳', '👩‍🍳', '👨‍🔧', '👩‍🔧', '👨‍🏭', '👩‍🏭', '👨‍💼', '👩‍💼', '👨‍🔬', '👩‍🔬',
-      '👨‍💻', '👩‍💻', '👨‍🎤', '👩‍🎤', '👨‍🎨', '👩‍🎨', '👨‍✈️', '👩‍✈️', '👨‍🚀', '👩‍🚀',
-      '👨‍🚒', '👩‍🚒', '👮', '🕵️', '💂', '👷', '🤴', '👸', '👳', '👲',
-      '🧕', '🤵', '👰', '🤰', '🤱', '👼', '🎅', '🤶', '🧑‍🎄', '🦸',
-      '🦹', '🧙', '🧚', '🧛', '🧜', '🧝', '🧞', '🧟', '💆', '💇',
-      '🚶', '🧍', '🧎', '🏃', '💃', '🕺', '🕴️', '👯', '🧖', '🧘',
-      '🧗', '🤺', '🏇', '⛷️', '🏂', '🏌️', '🏄', '🚣', '🏊', '⛹️',
-      '🏋️', '🚴', '🚵', '🤸', '🤼', '🤽', '🤾', '🤹', '🛀', '🛌',
-      '👭', '👫', '👬', '💏', '💑', '👪', '🗣️', '👤', '👥', '👣',
-    ],
-  },
-  {
-    name: 'Animals',
-    icon: '🐶',
-    emojis: [
-      '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯',
-      '🦁', '🐮', '🐷', '🐽', '🐸', '🐵', '🙈', '🙉', '🙊', '🐒',
-      '🐔', '🐧', '🐦', '🐤', '🐣', '🐥', '🦆', '🦅', '🦉', '🦇',
-      '🐺', '🐗', '🐴', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜',
-      '🦟', '🦗', '🕷️', '🕸️', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕',
-      '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳',
-      '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛',
-      '🦏', '🐪', '🐫', '🦒', '🦘', '🐃', '🐂', '🐄', '🐎', '🐖',
-      '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮', '🐕‍🦺', '🐈',
-      '🐓', '🦃', '🦚', '🦜', '🦢', '🦩', '🐇', '🦝', '🦨', '🦡',
-      '🦦', '🦥', '🐁', '🐀', '🐿️', '🦔',
-    ],
-  },
-  {
-    name: 'Food',
-    icon: '🍕',
-    emojis: [
-      '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🍈',
-      '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑', '🥦',
-      '🥬', '🥒', '🌶️', '🌽', '🥕', '🧄', '🧅', '🥔', '🍠', '🥐',
-      '🥯', '🍞', '🥖', '🥨', '🧀', '🥚', '🍳', '🧈', '🥞', '🧇',
-      '🥓', '🥩', '🍗', '🍖', '🦴', '🌭', '🍔', '🍟', '🍕', '🥪',
-      '🥙', '🧆', '🌮', '🌯', '🥗', '🥘', '🥫', '🍝', '🍜', '🍲',
-      '🍛', '🍣', '🍱', '🥟', '🦪', '🍤', '🍙', '🍚', '🍘', '🍥',
-      '🥠', '🥮', '🍢', '🍡', '🍧', '🍨', '🍦', '🥧', '🧁', '🍰',
-      '🎂', '🍮', '🍭', '🍬', '🍫', '🍿', '🍩', '🍪', '🌰', '🥜',
-      '🍯', '🥛', '🍼', '☕', '🍵', '🧃', '🥤', '🍶', '🍺', '🍻',
-      '🥂', '🍷', '🥃', '🍸', '🍹', '🧉', '🍾', '🧊', '🥄', '🍴',
-      '🍽️', '🥣', '🥡', '🥢', '🧂', '⚽', '🏀', '🏈', '⚾', '🥎',
-      '🎾', '🏐', '🏉', '🥏', '🎱', '🪀', '🏓', '🏸', '🏒', '🏑',
-      '🥍', '🏏', '🥅', '⛳', '🪁', '🏹', '🎣', '🤿', '🥊', '🥋',
-      '🎽', '🛹', '🛼', '🛷', '⛸️', '🥌', '🎿', '⛷️', '🏂', '🏋️',
-      '🤼', '🤸', '🤺', '🤾', '🏌️', '🏇', '🧘', '🏄', '🏊', '🤽',
-      '🚣', '🧗', '🚴', '🚵', '🎖️', '🏅', '🥇', '🥈', '🥉', '🏆',
-      '🏵️', '🎗️', '🎫', '🎟️', '🎪', '🤹', '🎭', '🩰', '🎨', '🎬',
-      '🎤', '🎧', '🎼', '🎹', '🥁', '🎷', '🎺', '🎸', '🪕', '🎻',
-      '🎲', '♟️', '🎯', '🎳', '🎮', '🎰', '🧩',
-    ],
-  },
-  {
-    name: 'Travel',
-    icon: '✈️',
-    emojis: [
-      '🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐',
-      '🚚', '🚛', '🚜', '🦯', '🦽', '🦼', '🛴', '🚲', '🛵', '🏍️',
-      '🛺', '🚨', '🚔', '🚍', '🚘', '🚖', '🚡', '🚠', '🚟', '🚃',
-      '🚋', '🚞', '🚝', '🚄', '🚅', '🚈', '🚂', '🚆', '🚇', '🚊',
-      '🚉', '✈️', '🛫', '🛬', '🛩️', '💺', '🛰️', '🚀', '🛸', '🚁',
-      '🛶', '⛵', '🚤', '🛥️', '🛳️', '⛴️', '🚢', '⚓', '⛽', '🚧',
-      '🚦', '🚥', '🚏', '🗺️', '🗿', '🗽', '🗼', '🏰', '🏯', '🏟️',
-      '🎡', '🎢', '🎠', '⛲', '⛱️', '🏖️', '🏝️', '🏜️', '🌋', '⛰️',
-      '🏔️', '🗻', '🏕️', '⛺', '🏠', '🏡', '🏘️', '🏚️', '🏗️', '🏭',
-      '🏢', '🏬', '🏣', '🏤', '🏥', '🏦', '🏨', '🏪', '🏫', '🏩',
-      '💒', '🏛️', '⛪', '🕌', '🕍', '🛕', '🕋', '⛩️', '🛤️', '🛣️',
-      '🗾', '🎑', '🏞️', '🌅', '🌄', '🌠', '🎇', '🎆', '🌇', '🌆',
-      '🏙️', '🌃', '🌌', '🌉', '🌁', '🌂', '☔', '⚡', '❄️', '☃️',
-      '⛄', '☄️', '🔥', '💧', '🌊',
-    ],
-  },
-  {
-    name: 'Objects',
-    icon: '💡',
-    emojis: [
-      '🎃', '🎄', '🎆', '🎇', '🧨', '✨', '🎈', '🎉', '🎊', '🎋',
-      '🎍', '🎎', '🎏', '🎐', '🎑', '🧧', '🎀', '🎁', '🎗️', '🎟️',
-      '🎫', '🎖️', '🏆', '🏅', '🥇', '🥈', '🥉', '⚽', '⚾', '🥎',
-      '🏀', '🏐', '🏈', '🏉', '🎾', '🥏', '🎳', '🏏', '🏑', '🏒',
-      '🥍', '🏓', '🏸', '🥊', '🥋', '🥅', '⛳', '⛸️', '🎣', '🤿',
-      '🎽', '🎿', '🛷', '🥌', '🎯', '🪀', '🪁', '🎱', '🔮', '🧿',
-      '🎮', '🕹️', '🎰', '🎲', '🧩', '🧸', '🪅', '🪆', '♠️', '♥️',
-      '♦️', '♣️', '♟️', '🃏', '🀄', '🎴', '🎭', '🖼️', '🎨', '🧵',
-      '🪡', '🧶', '🪢', '👓', '🕶️', '🥽', '🥼', '🦺', '👔', '👕',
-      '👖', '🧣', '🧤', '🧥', '🧦', '👗', '👘', '🥻', '🩱', '🩲',
-      '🩳', '👙', '👚', '👛', '👜', '👝', '🛍️', '🎒', '🩴', '👞',
-      '👟', '🥾', '🥿', '👠', '👡', '🩰', '👢', '👑', '👒', '🎩',
-      '🎓', '🧢', '⛑️', '📿', '💄', '💍', '💎', '🔇', '🔈', '🔉',
-      '🔊', '📢', '📣', '📯', '🔔', '🔕', '🎼', '🎵', '🎶', '🎙️',
-      '🎚️', '🎛️', '🎤', '🎧', '📻', '🎷', '🎸', '🎹', '🎺', '🎻',
-      '🪕', '🥁', '📱', '📲', '☎️', '📞', '📟', '📠', '🔋', '🔌',
-      '💻', '🖥️', '🖨️', '⌨️', '🖱️', '🖲️', '💽', '💾', '💿', '📀',
-      '🧮', '🎥', '🎞️', '📽️', '🎬', '📺', '📷', '📸', '📹', '📼',
-      '🔍', '🔎', '🕯️', '💡', '🔦', '🏮', '🪔', '📔', '📕', '📖',
-      '📗', '📘', '📙', '📚', '📓', '📒', '📃', '📜', '📄', '📰',
-      '🗞️', '📑', '🔖', '🏷️', '💰', '💴', '💵', '💶', '💷', '💸',
-      '💳', '🧾', '💹', '✉️', '📧', '📨', '📩', '📤', '📥', '📦',
-      '📫', '📪', '📬', '📭', '📮', '🗳️', '✏️', '✒️', '🖋️', '🖊️',
-      '🖌️', '🖍️', '📝', '💼', '📁', '📂', '🗂️', '📅', '📆', '🗒️',
-      '🗓️', '📇', '📈', '📉', '📊', '📋', '📌', '📍', '📎', '🖇️',
-      '📏', '📐', '✂️', '🗃️', '🗄️', '🗑️', '🔒', '🔓', '🔏', '🔐',
-      '🔑', '🗝️', '🔨', '🪓', '⛏️', '⚒️', '🛠️', '🗡️', '⚔️', '🔫',
-      '🏹', '🛡️', '🔧', '🔩', '⚙️', '🗜️', '⚖️', '🦯', '🔗', '⛓️',
-      '🧰', '🧲', '⚗️', '🧪', '🧫', '🧬', '🔬', '🔭', '📡', '💉',
-      '🩸', '💊', '🩹', '🩺', '🚪', '🛗', '🪞', '🪟', '🛏️', '🛋️',
-      '🪑', '🚽', '🪠', '🚿', '🛁', '🪤', '🪒', '🧴', '🧷', '🧹',
-      '🧺', '🧻', '🧼', '🧽', '🧯', '🛒', '🎁', '🎈', '🎏', '🎀',
-      '🎊', '🎉', '🎎', '🏮', '🎐', '🧧', '✨', '🎇', '🎆', '📇',
-    ],
-  },
-  {
-    name: 'Symbols',
-    icon: '⭐',
-    emojis: [
-      '🏧', '🚮', '🚰', '♿', '🚹', '🚺', '🚻', '🚼', '🚾', '🛂',
-      '🛃', '🛄', '🛅', '⚠️', '🚸', '⛔', '🚫', '🚳', '🚭', '🚯',
-      '🚱', '🚷', '📵', '🔞', '☢️', '☣️', '⬆️', '↗️', '➡️', '↘️',
-      '⬇️', '↙️', '⬅️', '↖️', '↕️', '↔️', '↩️', '↪️', '⤴️', '⤵️',
-      '🔃', '🔄', '🔙', '🔚', '🔛', '🔜', '🔝', '🛐', '⚛️', '🕉️',
-      '✡️', '☸️', '☯️', '✝️', '☦️', '☪️', '☮️', '🕎', '🔯', '♈',
-      '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒',
-      '♓', '⛎', '🔀', '🔁', '🔂', '▶️', '⏩', '⏭️', '⏯️', '◀️',
-      '⏪', '⏮️', '🔼', '⏫', '🔽', '⏬', '⏸️', '⏹️', '⏺️', '⏏️',
-      '🎦', '🔅', '🔆', '📶', '📳', '📴', '♀️', '♂️', '⚕️', '♾️',
-      '♻️', '⚜️', '🔱', '📛', '🔰', '⭕', '✅', '☑️', '✔️', '✖️',
-      '❌', '❎', '➕', '➖', '➗', '➰', '➿', '〽️', '✳️', '✴️',
-      '❇️', '‼️', '⁉️', '❓', '❔', '❕', '❗', '〰️', '©️', '®️',
-      '™️', '#️⃣', '*️⃣', '0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣',
-      '7️⃣', '8️⃣', '9️⃣', '🔟', '🔠', '🔡', '🔢', '🔣', '🔤', '🅰️',
-      '🆎', '🅱️', '🆑', '🆒', '🆓', 'ℹ️', '🆔', 'Ⓜ️', '🆕', '🆖',
-      '🅾️', '🆗', '🅿️', '🆘', '🆙', '🆚', '🈁', '🈂️', '🈷️', '🈶',
-      '🈯', '🉐', '🈹', '🈚', '🈲', '🉑', '🈸', '🈴', '🈳', '㊗️',
-      '㊙️', '🈺', '🈵', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤',
-      '⚫', '⚪', '🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '🟫', '⬛',
-      '⬜', '◼️', '◻️', '◾', '◽', '▪️', '▫️', '🔶', '🔷', '🔸',
-      '🔹', '🔺', '🔻', '💠', '🔘', '🔳', '🔲', '🏁', '🚩', '🎌',
-      '🏴', '🏳️', '🏳️‍🌈', '🏴‍☠️', '🇦🇨', '🇦🇩', '🇦🇪', '🇦🇫', '🇦🇬', '🇦🇮',
-    ],
+    emojis: ['👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '🙏'],
   },
 ];
+
 const WEBSOCKET_PORT = 3003;
 const INACTIVITY_TIMEOUT = 60 * 1000;
 const LONG_PRESS_DURATION = 500;
@@ -318,7 +128,7 @@ export default function ChatPage() {
   const [selectedCategory, setSelectedCategory] = useState(0);
   const [floatingEmojis, setFloatingEmojis] = useState<Array<{emoji: string; left: string; top: string}>>([]);
 
-  // Action menu state - shows on long press
+  // Action menu state
   const [showActionMenu, setShowActionMenu] = useState<string | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -329,23 +139,37 @@ export default function ChatPage() {
 
   // Call state
   const [callState, setCallState] = useState<{
-    type: 'voice' | 'video' | 'screen' | null;
-    status: 'idle' | 'calling' | 'ringing' | 'connected' | 'ended';
+    type: 'voice' | 'video' | null;
+    status: 'idle' | 'calling' | 'ringing' | 'connected';
     otherUserId: string | null;
-  }>({ type: null, status: 'idle', otherUserId: null });
+    otherUserName: string | null;
+    isMinimized: boolean;
+    isMuted: boolean;
+    isVideoOff: boolean;
+    isScreenSharing: boolean;
+  }>({ 
+    type: null, 
+    status: 'idle', 
+    otherUserId: null, 
+    otherUserName: null,
+    isMinimized: false,
+    isMuted: false,
+    isVideoOff: false,
+    isScreenSharing: false
+  });
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
 
-  // Watch together state
-  const [watchTogether, setWatchTogether] = useState<{
-    active: boolean;
-    videoUrl: string;
-    isPlaying: boolean;
-    currentTime: number;
-    hostId: string | null;
-  }>({ active: false, videoUrl: '', isPlaying: false, currentTime: 0, hostId: null });
-  const [showWatchTogether, setShowWatchTogether] = useState(false);
+  // Use refs for things that need to be accessed in callbacks without stale closure issues
+  const peerRef = useRef<SimplePeer.Instance | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const userRef = useRef<UserInfo | null>(null);
+  const callStateRef = useRef(callState);
+  const signalBufferRef = useRef<any[]>([]); // Buffer for signals received before peer is ready
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -356,13 +180,12 @@ export default function ChatPage() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // WebRTC configuration
-  const rtcConfig: RTCConfiguration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  };
+  // Keep refs in sync
+  useEffect(() => { callStateRef.current = callState; }, [callState]);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
+  useEffect(() => { remoteStreamRef.current = remoteStream; }, [remoteStream]);
 
   // Inactivity timer
   const resetInactivityTimer = useCallback(() => {
@@ -385,15 +208,8 @@ export default function ChatPage() {
         });
       }, 1000);
     }, INACTIVITY_TIMEOUT - 10000);
-
-    return () => {
-      if (inactivityTimerRef.current) {
-        clearTimeout(inactivityTimerRef.current);
-      }
-    };
   }, []);
 
-  // Reset timer on user activity
   useEffect(() => {
     const handleActivity = () => resetInactivityTimer();
     window.addEventListener('mousemove', handleActivity);
@@ -435,6 +251,48 @@ export default function ChatPage() {
     }
   }, [router]);
 
+  // End call function - defined before socket connection
+  const endCall = useCallback(() => {
+    console.log('Ending call...');
+    
+    // Stop all tracks
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    remoteStreamRef.current?.getTracks().forEach(t => t.stop());
+    
+    // Destroy peer
+    if (peerRef.current) {
+      peerRef.current.destroy();
+      peerRef.current = null;
+    }
+    
+    // Clear signal buffer
+    signalBufferRef.current = [];
+    
+    // Reset state
+    setLocalStream(null);
+    setRemoteStream(null);
+    setScreenStream(null);
+    setCallState({ 
+      type: null, 
+      status: 'idle', 
+      otherUserId: null, 
+      otherUserName: null,
+      isMinimized: false,
+      isMuted: false,
+      isVideoOff: false,
+      isScreenSharing: false
+    });
+
+    // Notify other user
+    if (socketRef.current && callStateRef.current.otherUserId) {
+      socketRef.current.emit('call_signal', {
+        type: 'call-end',
+        from: userRef.current?.id,
+        to: callStateRef.current.otherUserId,
+      });
+    }
+  }, []);
+
   // Socket connection
   useEffect(() => {
     if (!user) return;
@@ -444,6 +302,7 @@ export default function ChatPage() {
     });
 
     socketInstance.on('connect', () => {
+      console.log('Socket connected');
       socketInstance.emit('join_chat', { userId: user.id, userName: user.name });
       setOnlineUsers(new Set([user.id]));
     });
@@ -460,15 +319,11 @@ export default function ChatPage() {
     });
 
     socketInstance.on('message_updated', (data: Partial<Message> & { id: string }) => {
-      setMessages((prev) => prev.map((m) => m.id === data.id ? { ...m, ...data } : m));
+      setMessages((prev) => prev.map((m) => m.id === data.id ? { ...m, ...data, isEdited: true } : m));
     });
 
     socketInstance.on('message_deleted', (messageId: string) => {
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
-    });
-
-    socketInstance.on('message_reaction', (data: { messageId: string; reactions: Reaction[] }) => {
-      setMessages((prev) => prev.map((m) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
     });
 
     socketInstance.on('online_users', (users: { userId: string; userName: string }[]) => {
@@ -487,75 +342,179 @@ export default function ChatPage() {
       });
     });
 
-    // WebRTC signaling
-    socketInstance.on('call_signal', async (signal) => {
-      if (signal.type === 'call-start') {
-        setCallState({ type: signal.callType || 'voice', status: 'ringing', otherUserId: signal.from });
-      } else if (signal.type === 'call-decline') {
+    // WebRTC Call signaling
+    socketInstance.on('call_signal', async (signal: CallSignal) => {
+      console.log('📞 Received call signal:', signal.type, 'from:', signal.from);
+
+      if (signal.type === 'call-request') {
+        // Incoming call
+        setCallState({
+          type: signal.callType || 'voice',
+          status: 'ringing',
+          otherUserId: signal.from,
+          otherUserName: null,
+          isMinimized: false,
+          isMuted: false,
+          isVideoOff: false,
+          isScreenSharing: false,
+        });
+      } else if (signal.type === 'call-accept') {
+        // Call was accepted - we already created peer as initiator in startCall
+        console.log('📞 Call accepted by remote peer');
+        // Peer should already be created and signaling
+      } else if (signal.type === 'call-reject') {
+        console.log('📞 Call rejected');
         endCall();
       } else if (signal.type === 'call-end') {
+        console.log('📞 Call ended by other party');
         endCall();
-      } else if (signal.type === 'answer' && peerConnection) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.data));
-      } else if (signal.type === 'offer') {
-        const pc = new RTCPeerConnection(rtcConfig);
-        setPeerConnection(pc);
-
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            socketInstance.emit('call_signal', {
-              type: 'ice-candidate',
-              from: user.id,
-              to: signal.from,
-              data: event.candidate,
-            });
-          }
-        };
-
-        pc.ontrack = (event) => {
-          setRemoteStream(event.streams[0]);
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-          }
-        };
-
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.data));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socketInstance.emit('call_signal', {
-          type: 'answer',
-          from: user.id,
-          to: signal.from,
-          data: answer,
-        });
-      } else if (signal.type === 'ice-candidate' && peerConnection) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(signal.data));
-      }
-    });
-
-    // Watch together signaling
-    socketInstance.on('watch_together', (signal) => {
-      if (signal.type === 'join' || signal.type === 'sync') {
-        setWatchTogether(prev => ({
-          ...prev,
-          active: true,
-          videoUrl: signal.data.videoUrl || prev.videoUrl,
-          currentTime: signal.data.currentTime || 0,
-          isPlaying: signal.data.isPlaying ?? prev.isPlaying,
-          hostId: signal.from,
-        }));
-      } else if (signal.type === 'play') {
-        setWatchTogether(prev => ({ ...prev, isPlaying: true }));
-      } else if (signal.type === 'pause') {
-        setWatchTogether(prev => ({ ...prev, isPlaying: false }));
-      } else if (signal.type === 'seek') {
-        setWatchTogether(prev => ({ ...prev, currentTime: signal.data.currentTime || 0 }));
+      } else if (signal.type === 'signal') {
+        // WebRTC signal data (offer, answer, or ICE candidates)
+        console.log('📞 Received WebRTC signal data:', signal.signal?.type || 'ICE candidate');
+        
+        if (peerRef.current && signal.signal) {
+          console.log('📞 Signaling peer with received data');
+          peerRef.current.signal(signal.signal);
+        } else if (signal.signal) {
+          // Peer not ready yet - buffer the signal
+          console.log('📞 Peer not ready, buffering signal. Buffer size:', signalBufferRef.current.length + 1);
+          signalBufferRef.current.push(signal.signal);
+        }
       }
     });
 
     setSocket(socketInstance);
-    return () => socketInstance.disconnect();
-  }, [user]);
+    return () => {
+      console.log('Disconnecting socket...');
+      socketInstance.disconnect();
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+    };
+  }, [user, endCall]);
+
+  // Create SimplePeer instance
+  const createPeer = useCallback((initiator: boolean, stream: MediaStream, otherUserId: string) => {
+    console.log('🔧 Creating peer, initiator:', initiator, 'otherUserId:', otherUserId);
+    
+    // Destroy existing peer if any
+    if (peerRef.current) {
+      console.log('🔧 Destroying existing peer');
+      peerRef.current.destroy();
+      peerRef.current = null;
+    }
+
+    const newPeer = new SimplePeer({
+      initiator,
+      trickle: true, // Enable trickle ICE for better connectivity
+      stream: stream,
+      channelName: 'chat-call-' + Date.now(), // Unique channel name
+      offerOptions: {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      },
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          // Add more public STUN servers for better connectivity
+          { urls: 'stun:stun.stunprotocol.org:3478' },
+          { urls: 'stun:stun.voip.eutelia.it:3478' },
+        ],
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+      },
+    });
+
+    newPeer.on('signal', (signalData) => {
+      const signalType = (signalData as any).type || 'ICE candidate';
+      console.log('📤 Peer signal generated:', signalType, 'sending to:', otherUserId);
+      if (socketRef.current) {
+        socketRef.current.emit('call_signal', {
+          type: 'signal',
+          from: userRef.current?.id,
+          to: otherUserId,
+          signal: signalData,
+        });
+      }
+    });
+
+    newPeer.on('stream', (stream) => {
+      console.log('📥 Received remote stream!', stream.getTracks().map(t => `${t.kind}:${t.enabled}`));
+      setRemoteStream(stream);
+      remoteStreamRef.current = stream;
+      
+      // Always use the video element - it handles both audio and video streams
+      // For video calls, it shows video + plays audio
+      // For voice calls, it just plays audio (video is hidden)
+      if (remoteVideoRef.current) {
+        console.log('📥 Setting remote stream to video element');
+        remoteVideoRef.current.srcObject = stream;
+        
+        // Try to play immediately
+        const playPromise = remoteVideoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log('📥 Remote stream playing successfully');
+            })
+            .catch(e => {
+              console.log('📥 Autoplay blocked, will retry on user interaction:', e.message);
+              // The video element should autoplay since it was triggered by user action (accepting call)
+              // But if blocked, it will play when user interacts
+            });
+        }
+      }
+    });
+
+    newPeer.on('connect', () => {
+      console.log('✅ Peer connected!');
+      setCallState(prev => ({ ...prev, status: 'connected' }));
+    });
+
+    newPeer.on('error', (err) => {
+      console.error('❌ Peer error:', err.code || err);
+      // Don't end call on all errors, some are recoverable
+      if (err.code === 'ERR_DATA_CHANNEL' || err.code === 'ERR_CONNECTION_FAILURE') {
+        console.error('Fatal peer error, ending call');
+        endCall();
+      }
+    });
+
+    newPeer.on('close', () => {
+      console.log('🔌 Peer connection closed');
+    });
+
+    newPeer.on('iceStateChange', (state) => {
+      console.log('🧊 ICE state changed:', state);
+    });
+
+    peerRef.current = newPeer;
+    console.log('🔧 Peer created successfully');
+    
+    // Process any buffered signals
+    if (signalBufferRef.current.length > 0) {
+      console.log('🔧 Processing', signalBufferRef.current.length, 'buffered signals');
+      // Use setTimeout to ensure peer is fully initialized
+      setTimeout(() => {
+        const bufferedSignals = [...signalBufferRef.current];
+        signalBufferRef.current = [];
+        bufferedSignals.forEach((signalData, index) => {
+          if (peerRef.current) {
+            console.log(`🔧 Processing buffered signal ${index + 1}/${bufferedSignals.length}`);
+            peerRef.current.signal(signalData);
+          }
+        });
+      }, 50);
+    }
+    
+    return newPeer;
+  }, [endCall]);
 
   // Load messages
   useEffect(() => {
@@ -599,6 +558,24 @@ export default function ChatPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Update local video when stream changes
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  // Update remote video/audio when stream changes
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      console.log('🔊 Remote stream changed, setting to video element');
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(e => {
+        console.log('🔊 Play failed in effect:', e.message);
+      });
+    }
+  }, [remoteStream]);
+
   const handleSendMessage = async () => {
     if (!input.trim() || sending || !socket || !user) return;
     setSending(true);
@@ -607,15 +584,20 @@ export default function ChatPage() {
     const replyTo = replyingTo;
     setReplyingTo(null);
 
-    socket.emit('send_message', {
+    const messageData = {
       senderId: user.id,
       senderName: user.name,
       senderEmoji: user.emoji,
       content,
-      messageType: 'text',
-      fileId: null,
+      messageType: 'text' as const,
+      fileId: null as string | null,
       replyToId: replyTo?.id || null,
-    });
+      replyToContent: replyTo?.content || null,
+      replyToSender: replyTo?.senderName || null,
+      replyToEmoji: replyTo?.senderEmoji || null,
+    };
+
+    socket.emit('send_message', messageData);
 
     await fetch('/api/messages/save', {
       method: 'POST',
@@ -759,103 +741,133 @@ export default function ChatPage() {
     }
   };
 
-  // Call functions
+  // Start a call
   const startCall = async (type: 'voice' | 'video') => {
     if (!socket || !user) return;
     const otherUserId = Array.from(onlineUsers).find(id => id !== user.id);
-    if (!otherUserId) return;
+    if (!otherUserId) {
+      alert('No other user online to call');
+      return;
+    }
 
     try {
+      console.log('📞 Starting', type, 'call to:', otherUserId);
+      
+      // Get media stream
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: type === 'video' ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user',
+        } : false,
       });
+      
+      console.log('🎥 Got media stream:', stream.getTracks().map(t => t.kind));
+      
       setLocalStream(stream);
-      if (localVideoRef.current) {
+      localStreamRef.current = stream;
+      
+      setCallState({
+        type,
+        status: 'calling',
+        otherUserId,
+        otherUserName: null,
+        isMinimized: false,
+        isMuted: false,
+        isVideoOff: false,
+        isScreenSharing: false,
+      });
+
+      // Set local video
+      if (localVideoRef.current && type === 'video') {
         localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true; // Mute local video to prevent echo
+        localVideoRef.current.play().catch(e => console.log('Local video play error:', e));
       }
 
-      const pc = new RTCPeerConnection(rtcConfig);
-      setPeerConnection(pc);
+      // Create peer as initiator immediately - this will generate an offer
+      createPeer(true, stream, otherUserId);
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('call_signal', {
-            type: 'ice-candidate',
-            from: user.id,
-            to: otherUserId,
-            data: event.candidate,
-          });
-        }
-      };
-
-      pc.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
+      // Send call request
       socket.emit('call_signal', {
-        type: 'call-start',
+        type: 'call-request',
         from: user.id,
         to: otherUserId,
         callType: type,
-        data: offer,
       });
 
-      setCallState({ type, status: 'calling', otherUserId });
+      console.log('📞 Call request sent, peer created as initiator');
 
-      await fetch('/api/calls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callerId: user.id,
-          callerName: user.name,
-          receiverId: otherUserId,
-          callType: type,
-          status: 'calling',
-        }),
-      });
     } catch (err) {
       console.error('Failed to start call:', err);
+      alert('Failed to access camera/microphone. Please check permissions.');
     }
   };
 
-  const answerCall = async () => {
+  // Accept an incoming call
+  const acceptCall = async () => {
     if (!socket || !user || !callState.otherUserId) return;
 
     try {
+      console.log('📞 Accepting call...');
+      
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: callState.type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: callState.type === 'video' ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user',
+        } : false,
       });
+      
+      console.log('🎥 Got media stream:', stream.getTracks().map(t => t.kind));
+      
       setLocalStream(stream);
-      if (localVideoRef.current) {
+      localStreamRef.current = stream;
+      
+      // Set local video
+      if (localVideoRef.current && callState.type === 'video') {
         localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true; // Mute local video to prevent echo
+        localVideoRef.current.play().catch(e => console.log('Local video play error:', e));
       }
 
-      setCallState(prev => ({ ...prev, status: 'connected' }));
+      // Create peer as non-initiator (receiver) immediately
+      // This prepares us to receive the offer and send an answer
+      createPeer(false, stream, callState.otherUserId);
 
-      await fetch('/api/calls', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callId: callState.otherUserId, status: 'answered' }),
+      // Send accept signal
+      socket.emit('call_signal', {
+        type: 'call-accept',
+        from: user.id,
+        to: callState.otherUserId,
       });
+
+      console.log('📞 Call accept sent, peer created as receiver');
+      
+      // Update status
+      setCallState(prev => ({ ...prev, status: 'calling' }));
+
     } catch (err) {
-      console.error('Failed to answer call:', err);
+      console.error('Failed to accept call:', err);
+      rejectCall();
     }
   };
 
-  const declineCall = () => {
+  // Reject an incoming call
+  const rejectCall = () => {
     if (socket && callState.otherUserId) {
       socket.emit('call_signal', {
-        type: 'call-decline',
+        type: 'call-reject',
         from: user?.id,
         to: callState.otherUserId,
       });
@@ -863,149 +875,92 @@ export default function ChatPage() {
     endCall();
   };
 
-  const endCall = () => {
-    localStream?.getTracks().forEach(t => t.stop());
-    remoteStream?.getTracks().forEach(t => t.stop());
-    peerConnection?.close();
-    setLocalStream(null);
-    setRemoteStream(null);
-    setPeerConnection(null);
-    setCallState({ type: null, status: 'idle', otherUserId: null });
-  };
-
-  // Screen sharing
-  const startScreenShare = async () => {
-    if (!socket || !user) return;
-    const otherUserId = Array.from(onlineUsers).find(id => id !== user.id);
-    if (!otherUserId) return;
-
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
-      setLocalStream(stream);
-
-      const pc = new RTCPeerConnection(rtcConfig);
-      setPeerConnection(pc);
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('call_signal', {
-            type: 'ice-candidate',
-            from: user.id,
-            to: otherUserId,
-            data: event.candidate,
-          });
-        }
-      };
-
-      pc.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit('call_signal', {
-        type: 'call-start',
-        from: user.id,
-        to: otherUserId,
-        callType: 'screen',
-        data: offer,
-      });
-
-      setCallState({ type: 'screen', status: 'connected', otherUserId });
-    } catch (err) {
-      console.error('Failed to share screen:', err);
-    }
-  };
-
-  // Reactions
-  const handleReaction = async (messageId: string, emoji: string) => {
-    if (!user) return;
-    setShowActionMenu(null);
-
-    const response = await fetch('/api/messages/reactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId, userId: user.id, emoji }),
-    });
-    const data = await response.json();
-
-    if (data.success) {
-      // Immediately update local state
-      setMessages(prev => prev.map(m =>
-        m.id === messageId ? { ...m, reactions: data.reactions } : m
-      ));
-
-      // Broadcast to other users
-      if (socket) {
-        socket.emit('react_message', { messageId, emoji, userId: user.id });
+  // Toggle mute
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setCallState(prev => ({ ...prev, isMuted: !audioTrack.enabled }));
       }
     }
   };
 
-  // Watch together
-  const startWatchTogether = async (videoUrl: string) => {
-    if (!socket || !user) return;
-
-    setWatchTogether({ active: true, videoUrl, isPlaying: false, currentTime: 0, hostId: user.id });
-    setShowWatchTogether(false);
-
-    await fetch('/api/watch-together', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'create',
-        hostId: user.id,
-        hostName: user.name,
-        videoUrl,
-      }),
-    });
-
-    socket.emit('watch_together', {
-      type: 'join',
-      from: user.id,
-      data: { videoUrl, currentTime: 0, isPlaying: false },
-    });
-  };
-
-  const syncWatchTogether = (currentTime: number, isPlaying: boolean) => {
-    if (!socket || !user) return;
-
-    setWatchTogether(prev => ({ ...prev, currentTime, isPlaying }));
-
-    socket.emit('watch_together', {
-      type: isPlaying ? 'play' : 'pause',
-      from: user.id,
-      data: { currentTime, isPlaying },
-    });
-  };
-
-  const endWatchTogether = async () => {
-    if (socket) {
-      socket.emit('watch_together', { type: 'leave', from: user?.id || '', data: {} });
+  // Toggle video
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setCallState(prev => ({ ...prev, isVideoOff: !videoTrack.enabled }));
+      }
     }
-    await fetch('/api/watch-together', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'end' }),
-    });
-    setWatchTogether({ active: false, videoUrl: '', isPlaying: false, currentTime: 0, hostId: null });
   };
 
-  // Long press handler - shows action menu
+  // Toggle screen share
+  const toggleScreenShare = async () => {
+    if (callState.isScreenSharing) {
+      // Stop screen sharing
+      screenStream?.getTracks().forEach(t => t.stop());
+      setScreenStream(null);
+      
+      // Re-enable camera
+      if (localStreamRef.current) {
+        const videoTrack = localStreamRef.current.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.enabled = true;
+        }
+      }
+      
+      // Replace track in peer
+      if (peerRef.current && localStreamRef.current) {
+        const videoTrack = localStreamRef.current.getVideoTracks()[0];
+        if (videoTrack) {
+          const sender = (peerRef.current as any)._pc?.getSenders()?.find((s: RTCRtpSender) => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(videoTrack);
+          }
+        }
+      }
+      
+      setCallState(prev => ({ ...prev, isScreenSharing: false }));
+    } else {
+      // Start screen sharing
+      try {
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+        
+        setScreenStream(displayStream);
+        
+        // Replace video track in peer
+        const screenTrack = displayStream.getVideoTracks()[0];
+        if (peerRef.current && screenTrack) {
+          const sender = (peerRef.current as any)._pc?.getSenders()?.find((s: RTCRtpSender) => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          }
+        }
+        
+        setCallState(prev => ({ ...prev, isScreenSharing: true }));
+        
+        // Handle screen share end
+        screenTrack.onended = () => {
+          toggleScreenShare();
+        };
+        
+      } catch (err) {
+        console.error('Failed to share screen:', err);
+      }
+    }
+  };
+
+  // Long press handler
   const handleLongPressStart = (e: React.MouseEvent | React.TouchEvent, message: Message) => {
     e.preventDefault();
     
     longPressTimerRef.current = setTimeout(() => {
-      // Get position for the menu
       let x = 0, y = 0;
       if ('touches' in e) {
         x = e.touches[0].clientX;
@@ -1028,40 +983,42 @@ export default function ChatPage() {
   };
 
   const handleDeleteMessage = async (messageId: string) => {
-    if (!user) return;
-    const response = await fetch('/api/messages/delete', {
+    if (!user || !socket) return;
+    
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+    setDeleteDialogOpen(false);
+    setMessageToDelete(null);
+    setShowActionMenu(null);
+    
+    socket.emit('delete_message', messageId);
+    
+    await fetch('/api/messages/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messageId, userId: user.id }),
     });
-    const data = await response.json();
-    if (data.success) {
-      setMessages(prev => prev.filter(m => m.id !== messageId));
-      if (socket) socket.emit('delete_message', messageId);
-      setDeleteDialogOpen(false);
-      setMessageToDelete(null);
-      setShowActionMenu(null);
-    }
   };
 
   const handleEditMessage = async () => {
-    if (!messageToEdit || !user) return;
-    const response = await fetch('/api/messages/edit', {
+    if (!messageToEdit || !user || !socket) return;
+    
+    const newContent = editContent;
+    
+    setMessages(prev => prev.map(m =>
+      m.id === messageToEdit.id ? { ...m, content: newContent, isEdited: true, editedAt: new Date().toISOString() } : m
+    ));
+    setEditDialogOpen(false);
+    setMessageToEdit(null);
+    setEditContent('');
+    setShowActionMenu(null);
+    
+    socket.emit('edit_message', { messageId: messageToEdit.id, content: newContent });
+    
+    await fetch('/api/messages/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId: messageToEdit.id, userId: user.id, newContent: editContent }),
+      body: JSON.stringify({ messageId: messageToEdit.id, userId: user.id, newContent }),
     });
-    const data = await response.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m =>
-        m.id === messageToEdit.id ? { ...m, content: editContent, isEdited: true, editedAt: new Date().toISOString() } : m
-      ));
-      if (socket) socket.emit('edit_message', { messageId: messageToEdit.id, content: editContent });
-      setEditDialogOpen(false);
-      setMessageToEdit(null);
-      setEditContent('');
-      setShowActionMenu(null);
-    }
   };
 
   const handleDeleteAllMessages = async (action: 'mine' | 'all') => {
@@ -1142,7 +1099,7 @@ export default function ChatPage() {
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
           <div className="bg-red-900/90 backdrop-blur-md border border-red-500/50 rounded-lg p-4">
             <div className="flex items-center gap-3">
-              <AlertTriangle className="w-6 h-6 text-red-400" />
+              <span className="text-2xl">⚠️</span>
               <div>
                 <p className="text-white font-semibold">Redirecting in {timeLeft} seconds...</p>
                 <p className="text-red-200 text-sm">Click anywhere to stay</p>
@@ -1152,36 +1109,20 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Action Menu - Shows on long press */}
+      {/* Action Menu */}
       {showActionMenu && (
         <div 
           ref={actionMenuRef}
-          className="fixed z-50 bg-slate-800/95 backdrop-blur-xl border border-pink-900/50 rounded-xl shadow-2xl p-2 min-w-[180px]"
+          className="fixed z-50 bg-slate-800/95 backdrop-blur-xl border border-pink-900/50 rounded-xl shadow-2xl p-2 min-w-[150px]"
           style={{ 
-            left: Math.min(actionMenuPosition.x, window.innerWidth - 200),
-            top: Math.min(actionMenuPosition.y, window.innerHeight - 250)
+            left: Math.min(actionMenuPosition.x, window.innerWidth - 180),
+            top: Math.min(actionMenuPosition.y, window.innerHeight - 200)
           }}
         >
-          {/* Quick Reactions */}
-          <div className="flex items-center justify-around px-2 py-2 border-b border-white/10 mb-2">
-            {QUICK_REACTIONS.map(emoji => (
-              <button
-                key={emoji}
-                onClick={() => handleReaction(showActionMenu, emoji)}
-                className="text-2xl hover:scale-125 transition-transform p-1"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-          
-          {/* Action buttons */}
           <button
             onClick={() => {
               const msg = messages.find(m => m.id === showActionMenu);
-              if (msg) {
-                setReplyingTo(msg);
-              }
+              if (msg) setReplyingTo(msg);
               setShowActionMenu(null);
             }}
             className="w-full flex items-center gap-3 px-3 py-2 text-pink-300 hover:bg-pink-900/30 rounded-lg transition-colors"
@@ -1253,22 +1194,15 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Call buttons */}
             <Button variant="ghost" size="icon" onClick={() => startCall('voice')} className="text-pink-300 hover:text-pink-100 hover:bg-pink-900/30" title="Voice Call">
               <Phone className="w-5 h-5" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => startCall('video')} className="text-pink-300 hover:text-pink-100 hover:bg-pink-900/30" title="Video Call">
               <Video className="w-5 h-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={startScreenShare} className="text-pink-300 hover:text-pink-100 hover:bg-pink-900/30" title="Screen Share">
-              <Monitor className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => setShowWatchTogether(true)} className="text-pink-300 hover:text-pink-100 hover:bg-pink-900/30" title="Watch Together">
-              <Tv className="w-5 h-5" />
-            </Button>
 
             <Button variant="outline" size="sm" onClick={() => window.location.href = 'https://www.wikipedia.org'} className="border-red-500/50 text-red-400 hover:bg-red-900/30">
-              <AlertTriangle className="w-4 h-4 mr-2" /> Panic
+              Panic
             </Button>
 
             <DropdownMenu>
@@ -1296,86 +1230,154 @@ export default function ChatPage() {
       </header>
 
       {/* Call UI */}
-      {(callState.status !== 'idle' || localStream || remoteStream) && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center">
-          {remoteStream && (
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover absolute inset-0" />
-          )}
-          {localStream && callState.type === 'video' && (
-            <video ref={localVideoRef} autoPlay playsInline muted className="absolute bottom-24 right-4 w-48 h-36 rounded-lg border-2 border-pink-500 object-cover z-10" />
-          )}
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 z-20">
-            {callState.status === 'ringing' ? (
-              <>
-                <Button onClick={answerCall} className="bg-green-600 hover:bg-green-700 text-white rounded-full w-16 h-16">
-                  <Phone className="w-6 h-6" />
-                </Button>
-                <Button onClick={declineCall} className="bg-red-600 hover:bg-red-700 text-white rounded-full w-16 h-16">
-                  <PhoneOff className="w-6 h-6" />
-                </Button>
-              </>
-            ) : (
-              <Button onClick={endCall} className="bg-red-600 hover:bg-red-700 text-white rounded-full w-16 h-16">
-                <PhoneOff className="w-6 h-6" />
-              </Button>
+      {callState.status !== 'idle' && (
+        <div className={`fixed z-50 bg-black ${callState.isMinimized ? 'bottom-4 right-4 w-48 h-36 rounded-2xl overflow-hidden shadow-2xl' : 'inset-0'} flex flex-col transition-all duration-300`}>
+          {/* Video Area */}
+          <div className={`relative flex-1 ${callState.type === 'video' || callState.isScreenSharing ? 'bg-gray-900' : 'bg-gradient-to-br from-slate-900 via-pink-950/50 to-purple-950'}`}>
+            {/* Remote Video - ALWAYS render but only visible for video calls */}
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className={`absolute inset-0 w-full h-full object-cover ${callState.type === 'video' ? '' : 'opacity-0 pointer-events-none'}`}
+            />
+
+            {/* Local Video (picture-in-picture) - MIRRORED for natural self-view */}
+            {callState.type === 'video' && localStream && !callState.isVideoOff && !callState.isMinimized && (
+              <div className="absolute bottom-20 right-3 md:bottom-4 md:right-4 z-10">
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-24 h-32 md:w-36 md:h-48 rounded-2xl border-2 border-white/20 object-cover bg-black shadow-2xl"
+                  style={{ transform: 'scaleX(-1)' }}
+                />
+              </div>
+            )}
+
+            {/* Call Status Overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              {/* Calling State */}
+              {callState.status === 'calling' && (
+                <div className="text-center text-white pointer-events-auto">
+                  <div className="relative mb-6">
+                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center mx-auto shadow-2xl shadow-pink-500/30">
+                      {callState.type === 'video' ? <Video className="w-12 h-12 text-white" /> : <Phone className="w-12 h-12 text-white" />}
+                    </div>
+                    <div className="absolute inset-0 w-24 h-24 rounded-full bg-pink-500/30 animate-ping mx-auto" />
+                  </div>
+                  <p className="text-2xl font-semibold mb-2">Calling...</p>
+                  <p className="text-white/60 text-sm">Waiting for response</p>
+                </div>
+              )}
+
+              {/* Ringing State */}
+              {callState.status === 'ringing' && (
+                <div className="text-center text-white pointer-events-auto">
+                  <div className="relative mb-6">
+                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center mx-auto shadow-2xl shadow-green-500/30">
+                      {callState.type === 'video' ? <Video className="w-12 h-12 text-white" /> : <Phone className="w-12 h-12 text-white" />}
+                    </div>
+                    <div className="absolute inset-0 w-24 h-24 rounded-full bg-green-500/30 animate-ping mx-auto" />
+                  </div>
+                  <p className="text-2xl font-semibold mb-2">Incoming {callState.type} call</p>
+                  <div className="flex gap-6 justify-center mt-8">
+                    <button
+                      onClick={acceptCall}
+                      className="w-16 h-16 rounded-full bg-green-500 hover:bg-green-400 text-white flex items-center justify-center shadow-lg shadow-green-500/30 transition-all hover:scale-110"
+                    >
+                      <Phone className="w-7 h-7" />
+                    </button>
+                    <button
+                      onClick={rejectCall}
+                      className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 text-white flex items-center justify-center shadow-lg shadow-red-500/30 transition-all hover:scale-110"
+                    >
+                      <PhoneOff className="w-7 h-7" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Voice Call Connected State */}
+              {callState.status === 'connected' && callState.type === 'voice' && !callState.isScreenSharing && (
+                <div className="text-center text-white">
+                  <div className="relative mb-6">
+                    <div className="w-36 h-36 rounded-full bg-gradient-to-br from-pink-500 via-purple-500 to-pink-600 flex items-center justify-center mx-auto shadow-2xl shadow-pink-500/40">
+                      <Phone className="w-16 h-16 text-white" />
+                    </div>
+                    <div className="absolute inset-0 w-36 h-36 rounded-full bg-pink-500/20 animate-pulse mx-auto" />
+                  </div>
+                  <p className="text-2xl font-semibold">{callState.otherUserName || 'Partner'}</p>
+                  <div className="flex items-center justify-center gap-2 mt-2 text-pink-300">
+                    <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <p className="text-sm">Connected</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Minimize/Maximize button */}
+            <button
+              onClick={() => setCallState(prev => ({ ...prev, isMinimized: !prev.isMinimized }))}
+              className="absolute top-3 right-3 p-2.5 bg-white/10 backdrop-blur-sm rounded-xl text-white hover:bg-white/20 z-20 transition-all"
+            >
+              {callState.isMinimized ? <Maximize2 className="w-5 h-5" /> : <Minimize2 className="w-5 h-5" />}
+            </button>
+
+            {/* Call Timer or status */}
+            {callState.status === 'connected' && (
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-3 py-1.5 z-20">
+                <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-white text-sm font-medium">
+                  {callState.type === 'video' ? 'Video' : 'Voice'}
+                </span>
+              </div>
             )}
           </div>
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 text-white text-lg">
-            {callState.status === 'calling' && <p>Calling...</p>}
-            {callState.status === 'ringing' && <p>Incoming {callState.type} call...</p>}
-            {callState.status === 'connected' && <p>{callState.type === 'screen' ? 'Screen sharing' : 'Connected'}</p>}
-          </div>
-        </div>
-      )}
 
-      {/* Watch Together Modal */}
-      {showWatchTogether && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <Card className="bg-slate-900/95 backdrop-blur-xl border-pink-900/50 p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold text-pink-100 mb-4 flex items-center gap-2">
-              <Tv className="w-5 h-5" /> Watch Together
-            </h2>
-            <Input
-              placeholder="Enter video URL..."
-              className="bg-slate-800/50 border-pink-700/50 text-pink-100 mb-4"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  startWatchTogether((e.target as HTMLInputElement).value);
-                }
-              }}
-            />
-            <div className="flex gap-2">
-              <Button onClick={() => setShowWatchTogether(false)} variant="outline" className="flex-1 border-pink-700/50 text-pink-300">Cancel</Button>
-              <Button onClick={() => {
-                const input = document.querySelector('input[placeholder="Enter video URL..."]') as HTMLInputElement;
-                if (input?.value) startWatchTogether(input.value);
-              }} className="flex-1 bg-pink-600 hover:bg-pink-700">Start</Button>
-            </div>
-          </Card>
-        </div>
-      )}
+          {/* Call Controls */}
+          {(callState.status === 'connected' || callState.status === 'calling') && !callState.isMinimized && (
+            <div className="bg-gradient-to-t from-black via-black/95 to-black/80 backdrop-blur-xl px-6 py-5">
+              <div className="flex items-center justify-center gap-5">
+                {/* Mute Button */}
+                <button
+                  onClick={toggleMute}
+                  className={`w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 ${callState.isMuted ? 'bg-red-500 shadow-lg shadow-red-500/30' : 'bg-white/10 hover:bg-white/20'}`}
+                >
+                  {callState.isMuted ? <MicOff className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
+                </button>
 
-      {/* Watch Together Player */}
-      {watchTogether.active && (
-        <div className="fixed bottom-24 right-4 z-30 w-80">
-          <Card className="bg-slate-900/95 backdrop-blur-xl border-pink-900/50 overflow-hidden">
-            <div className="flex items-center justify-between p-2 border-b border-pink-900/30">
-              <span className="text-sm text-pink-300 flex items-center gap-1">
-                <Users className="w-4 h-4" /> Watch Together
-              </span>
-              <Button size="icon" variant="ghost" onClick={endWatchTogether} className="h-6 w-6 text-pink-400 hover:text-pink-100">
-                <X className="w-4 h-4" />
-              </Button>
+                {/* Video Toggle Button (video calls only) */}
+                {callState.type === 'video' && (
+                  <button
+                    onClick={toggleVideo}
+                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 ${callState.isVideoOff ? 'bg-red-500 shadow-lg shadow-red-500/30' : 'bg-white/10 hover:bg-white/20'}`}
+                  >
+                    {callState.isVideoOff ? <VideoOff className="w-6 h-6 text-white" /> : <Video className="w-6 h-6 text-white" />}
+                  </button>
+                )}
+
+                {/* End Call Button */}
+                <button
+                  onClick={endCall}
+                  className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 flex items-center justify-center shadow-lg shadow-red-500/30 transition-all hover:scale-110"
+                >
+                  <PhoneOff className="w-7 h-7 text-white" />
+                </button>
+
+                {/* Screen Share Button (video calls only) */}
+                {callState.type === 'video' && (
+                  <button
+                    onClick={toggleScreenShare}
+                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 ${callState.isScreenSharing ? 'bg-blue-500 shadow-lg shadow-blue-500/30' : 'bg-white/10 hover:bg-white/20'}`}
+                  >
+                    <Monitor className="w-6 h-6 text-white" />
+                  </button>
+                )}
+              </div>
             </div>
-            <video
-              src={watchTogether.videoUrl}
-              className="w-full aspect-video"
-              controls
-              onPlay={() => syncWatchTogether(watchTogether.currentTime, true)}
-              onPause={() => syncWatchTogether(watchTogether.currentTime, false)}
-              onTimeUpdate={(e) => setWatchTogether(prev => ({ ...prev, currentTime: (e.target as HTMLVideoElement).currentTime }))}
-            />
-          </Card>
+          )}
         </div>
       )}
 
@@ -1393,27 +1395,26 @@ export default function ChatPage() {
           ) : (
             messages.map((message) => {
               const isOwn = message.senderId === user.id;
-              const reactions = message.reactions || [];
 
               return (
                 <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] md:max-w-[70%] space-y-1 ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
-                    {/* WhatsApp-style reply preview - ABOVE the message bubble */}
+                  <div className={`max-w-[70%] space-y-1 ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+                    {/* Reply preview */}
                     {message.replyToId && (
-                      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
-                        isOwn ? 'bg-pink-600/40 text-pink-100' : 'bg-slate-700/60 text-pink-200'
-                      } border-l-2 border-purple-400 mb-1`}>
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs ${
+                        isOwn ? 'bg-pink-500/30 text-pink-100' : 'bg-slate-600/50 text-pink-200'
+                      } border-l-2 border-purple-400 mb-0.5 max-w-full`}>
                         <Reply className="w-3 h-3 flex-shrink-0 text-purple-300" />
-                        <span className="font-semibold text-purple-300">{message.replyToSender || 'User'}</span>
-                        <span className="text-white/60 truncate max-w-[150px]">{message.replyToContent || '...'}</span>
+                        <span className="font-medium text-purple-300">{message.replyToSender || 'User'}</span>
+                        <span className="text-white/50 truncate flex-1">{message.replyToContent || '...'}</span>
                       </div>
                     )}
 
                     <div className="relative">
                       <Card
-                        className={`p-0 overflow-hidden backdrop-blur-md transition-all cursor-pointer select-none ${
+                        className={`overflow-hidden backdrop-blur-md transition-all cursor-pointer select-none ${
                           isOwn
-                            ? 'bg-gradient-to-br from-pink-600/80 to-purple-600/80 text-white border-0 shadow-xl shadow-pink-900/20'
+                            ? 'bg-gradient-to-br from-pink-600/80 to-purple-600/80 text-white border-0 shadow-lg shadow-pink-900/20'
                             : 'bg-slate-800/60 backdrop-blur-md border-pink-900/30'
                         }`}
                         onTouchStart={(e) => handleLongPressStart(e, message)}
@@ -1422,38 +1423,23 @@ export default function ChatPage() {
                         onMouseUp={handleLongPressEnd}
                         onMouseLeave={handleLongPressEnd}
                       >
-                        {/* Main message content */}
-                        <div className="p-4">
+                        <div className="px-3 py-2">
                           {!isOwn && message.senderName && (
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-sm">{message.senderEmoji || '💕'}</span>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-xs">{message.senderEmoji || '💕'}</span>
                               <span className="text-xs text-pink-400 font-medium">{message.senderName}</span>
                             </div>
                           )}
                           {renderMessageContent(message)}
                           {message.isEdited && (
-                            <p className="text-xs text-white/50 mt-2 italic">✏️ Edited</p>
+                            <p className="text-xs text-white/50 mt-1 italic">✏️ Edited</p>
                           )}
                         </div>
                       </Card>
-
-                      {/* Reactions - Lower left corner of the message */}
-                      {reactions.length > 0 && (
-                        <div className={`absolute -bottom-3 ${isOwn ? 'left-2' : 'left-2'} flex items-center gap-0.5 bg-slate-900/90 backdrop-blur-sm rounded-full px-1.5 py-0.5 shadow-lg border border-pink-900/30`}>
-                          {Object.entries(reactions.reduce((acc, r) => {
-                            acc[r.emoji] = (acc[r.emoji] || 0) + 1;
-                            return acc;
-                          }, {} as Record<string, number>)).map(([emoji, count]) => (
-                            <span key={emoji} className="inline-flex items-center text-sm">
-                              {emoji} {count > 1 && <span className="text-pink-300 text-xs ml-0.5">{count}</span>}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
 
                     {/* Time & seen */}
-                    <div className={`flex items-center gap-2 px-1 ${reactions.length > 0 ? 'mt-4' : ''}`}>
+                    <div className="flex items-center gap-2 px-1 mt-1">
                       <span className="text-xs text-pink-400/50">{formatTime(message.createdAt)}</span>
                       {isOwn && message.seen && <span className="text-xs text-pink-400/50">Seen 💕</span>}
                     </div>
