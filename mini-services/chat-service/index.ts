@@ -70,17 +70,34 @@ interface ClientToServerEvents {
 }
 
 // Create HTTP server for Render health checks
+
 const httpServer = createServer((req, res) => {
-  // Health check endpoint
-  if (req.url === '/health' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
+  // Normalize URL to handle trailing slashes or query strings
+  const cleanUrl = req.url?.split('?')[0].replace(/\/+$/, '') || '';
+
+  if (cleanUrl === '/health' || cleanUrl === '') {
+    res.writeHead(200, { 
+      'Content-Type': 'text/plain',
+      'Access-Control-Allow-Origin': '*' 
+    });
     res.end('OK');
-  } else {
-    // Handle other HTTP routes (404)
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not Found');
+    return;
   }
+
+  res.writeHead(404);
+  res.end('Not Found');
 });
+
+const io = new Server(httpServer, {
+  cors: {
+    // Exact match for your Vercel app
+    origin: ["https://wiki-captcha.vercel.app", "http://localhost:3000"],
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+});
+
 
 // Create Socket.IO server attached to HTTP server
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -258,9 +275,12 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// Start server with environment port support for Render
+// Bind to 0.0.0.0 so Render's proxy can find the service
 const PORT = process.env.PORT || 3003;
-httpServer.listen(PORT, () => {
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`🚀 Chat Service running on port ${PORT}`);
   console.log(`🚀 Chat WebSocket service running on port ${PORT}`);
-  console.log(`🔍 Health check available at http://localhost:${PORT}/health`);
+  console.log(`🔍 Health check available at http://localhost:${PORT}/health`)
 });
+
+// Start server with environment port support for Render
