@@ -296,10 +296,10 @@ export default function ChatPage() {
   // Socket connection
   useEffect(() => {
     if (!user) return;
-
-    const socketInstance = io(`/?XTransformPort=${WEBSOCKET_PORT}`, {
-      transports: ['websocket', 'polling'],
-    });
+    
+const socketInstance = io("https://mose-1n7m.onrender.com", {
+  transports: ['websocket'], // Required for stable Render connections
+});
 
     socketInstance.on('connect', () => {
       console.log('Socket connected');
