@@ -1,3 +1,4 @@
+import { createServer } from 'http';
 import { Server } from 'socket.io';
 
 // Define message interface
@@ -68,11 +69,25 @@ interface ClientToServerEvents {
   call_signal: (signal: CallSignal) => void;
 }
 
-// Create Socket.IO server
-const io = new Server<ClientToServerEvents, ServerToClientEvents>({
+// Create HTTP server for Render health checks
+const httpServer = createServer((req, res) => {
+  // Health check endpoint
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('OK');
+  } else {
+    // Handle other HTTP routes (404)
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  }
+});
+
+// Create Socket.IO server attached to HTTP server
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: '*',
+    origin: ["https://wiki-captcha.vercel.app", "http://localhost:3000"],
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
@@ -243,7 +258,9 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// Start server on port 3003
-const PORT = 3003;
-io.listen(PORT);
-console.log(`🚀 Chat WebSocket service running on port ${PORT}`);
+// Start server with environment port support for Render
+const PORT = process.env.PORT || 3003;
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Chat WebSocket service running on port ${PORT}`);
+  console.log(`🔍 Health check available at http://localhost:${PORT}/health`);
+});
