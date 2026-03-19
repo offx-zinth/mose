@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = "postgresql://postgres:Welcome1@123456789$Do@db.mvprnkoufuoelqlzsgaq.supabase.co:5432/postgres"
+
 }
 
 // Message model for storing chat messages
@@ -78,21 +79,6 @@ model Call {
   endedAt      DateTime?
   duration     Int?     // Duration in seconds
   createdAt    DateTime @default(now())
-
-  @@index([createdAt])
-}
-
-// WatchTogether session for shared viewing
-model WatchTogether {
-  id           String   @id @default(cuid())
-  hostId       String
-  hostName     String?
-  videoUrl     String
-  status       String   @default("active") // "active", "ended"
-  currentTime  Float    @default(0)
-  isPlaying    Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  endedAt      DateTime?
 
   @@index([createdAt])
 }
