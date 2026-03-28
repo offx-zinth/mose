@@ -13,21 +13,20 @@ datasource db {
 
 // Message model for storing chat messages
 model Message {
-  id            String    @id @default(cuid())
-  senderId      String    // Identifier for sender (pr1 or pr2)
-  senderName    String?   // Name of the sender
-  senderEmoji   String?   // Emoji avatar of sender
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  senderId      String    @map("sender_id") // Identifier for sender (pr1 or pr2)
+  senderName    String?   @map("sender_name") // Name of the sender
+  senderEmoji   String?   @map("sender_emoji") // Emoji avatar of sender
   content       String?   // Text content (null for file-only messages)
-  messageType   String    @default("text") // "text", "image", "video", "document", "voice"
-  fileId        String?   // Reference to file if message contains file
-  fileUrl       String?   // URL path for file
-  fileName      String?   // Original filename
-  replyToId     String?   // ID of message being replied to
-  isEdited      Boolean   @default(false)
-  editedAt      DateTime?
-  createdAt     DateTime  @default(now())
+  messageType   String    @default("text") @map("message_type") // "text", "image", "video", "document", "voice"
+  fileId        String?   @map("file_id") // Reference to file if message contains file
+  fileUrl       String?   @map("file_url") // URL path for file
+  fileName      String?   @map("file_name") // Original filename
+  replyToId     String?   @map("reply_to_id") @db.Uuid // ID of message being replied to
+  isEdited      Boolean   @default(false) @map("is_edited")
+  editedAt      DateTime? @map("edited_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
   seen          Boolean   @default(false)
-  voiceDuration Int?      // Duration in seconds for voice notes
 
   file          File?          @relation(fields: [fileId], references: [id], onDelete: SetNull)
   reactions     Reaction[]
@@ -36,6 +35,7 @@ model Message {
 
   @@index([createdAt])
   @@index([senderId])
+  @@map("messages")
 }
 
 // File model for storing file metadata
@@ -56,7 +56,7 @@ model File {
 // Reaction model for emoji reactions to messages
 model Reaction {
   id        String   @id @default(cuid())
-  messageId String
+  messageId String   @db.Uuid
   userId    String
   emoji     String
   createdAt DateTime @default(now())

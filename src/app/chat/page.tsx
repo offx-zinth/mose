@@ -55,7 +55,6 @@ interface Message {
   replyToEmoji?: string | null;
   isEdited?: boolean;
   editedAt?: string | null;
-  voiceDuration?: number;
 }
 
 interface FileMetadata {
@@ -400,7 +399,7 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
             senderName: newMessage.sender_name,
             senderEmoji: newMessage.sender_emoji,
             content: newMessage.content,
-            messageType: newMessage.message_type,
+            messageType: newMessage.message_type as any,
             fileId: newMessage.file_id,
             fileUrl: newMessage.file_url,
             fileName: newMessage.file_name,
@@ -409,8 +408,6 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
             replyToId: newMessage.reply_to_id,
             replyToContent: newMessage.reply_to_content,
             replyToSender: newMessage.reply_to_sender_name,
-            // Note: replyToEmoji might not be in the direct table if not saved there
-            voiceDuration: newMessage.voice_duration,
           };
 
           setMessages((prev) => {
@@ -709,7 +706,7 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
       recorder.onstop = async () => {
         const blob = new Blob(chunks, { type: 'audio/webm' });
         const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-        await handleVoiceUpload(file, recordingTime);
+        await handleVoiceUpload(file);
         stream.getTracks().forEach(t => t.stop());
       };
 
@@ -736,7 +733,7 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
     }
   };
 
-  const handleVoiceUpload = async (file: File, duration: number) => {
+  const handleVoiceUpload = async (file: File) => {
     if (!user || !socket) return;
     try {
       const formData = new FormData();
@@ -755,7 +752,6 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
             messageType: 'voice',
             fileId: data.file.id,
             fileUrl: data.file.storagePath,
-            voiceDuration: duration,
           }),
         });
 
@@ -1086,7 +1082,6 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
       return (
         <div className="flex items-center gap-3 p-2">
           <audio src={message.fileUrl} controls className="h-8 max-w-[200px]" />
-          {message.voiceDuration && <span className="text-xs opacity-70">{formatDuration(message.voiceDuration)}</span>}
         </div>
       );
     }
