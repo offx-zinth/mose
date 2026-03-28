@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import SimplePeer from 'simple-peer';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -383,10 +384,48 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
       }
     });
 
+    // Supabase Realtime Backup
+    const channel = supabase
+      .channel('room-messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const newMessage = payload.new as any;
+
+          // Map snake_case from Supabase to camelCase for UI
+          const transformedMessage: Message = {
+            id: newMessage.id,
+            senderId: newMessage.sender_id,
+            senderName: newMessage.sender_name,
+            senderEmoji: newMessage.sender_emoji,
+            content: newMessage.content,
+            messageType: newMessage.message_type,
+            fileId: newMessage.file_id,
+            fileUrl: newMessage.file_url,
+            fileName: newMessage.file_name,
+            createdAt: newMessage.created_at,
+            seen: newMessage.seen || false,
+            replyToId: newMessage.reply_to_id,
+            replyToContent: newMessage.reply_to_content,
+            replyToSender: newMessage.reply_to_sender_name,
+            // Note: replyToEmoji might not be in the direct table if not saved there
+            voiceDuration: newMessage.voice_duration,
+          };
+
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === transformedMessage.id)) return prev;
+            return [...prev, transformedMessage];
+          });
+        }
+      )
+      .subscribe();
+
     setSocket(socketInstance);
     return () => {
-      console.log('Disconnecting socket...');
+      console.log('Disconnecting socket and cleaning up realtime...');
       socketInstance.disconnect();
+      supabase.removeChannel(channel);
       if (peerRef.current) {
         peerRef.current.destroy();
         peerRef.current = null;
@@ -577,42 +616,42 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
   }, [remoteStream]);
 
   const handleSendMessage = async () => {
-    if (!input.trim() || sending || !socket || !user) return;
+    if (!input.trim() || sending || !user) return;
     setSending(true);
     const content = input.trim();
     setInput('');
     const replyTo = replyingTo;
     setReplyingTo(null);
 
-    const messageData = {
-      senderId: user.id,
-      senderName: user.name,
-      senderEmoji: user.emoji,
-      content,
-      messageType: 'text' as const,
-      fileId: null as string | null,
-      replyToId: replyTo?.id || null,
-      replyToContent: replyTo?.content || null,
-      replyToSender: replyTo?.senderName || null,
-      replyToEmoji: replyTo?.senderEmoji || null,
-    };
+    try {
+      // Database-First approach: Save to Supabase via API
+      // The API will trigger the broadcast to Render WebSocket
+      const response = await fetch('/api/messages/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: user.id,
+          senderName: user.name,
+          senderEmoji: user.emoji,
+          content,
+          messageType: 'text',
+          replyToId: replyTo?.id || null,
+        }),
+      });
 
-    socket.emit('send_message', messageData);
-
-    await fetch('/api/messages/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        senderId: user.id,
-        senderName: user.name,
-        senderEmoji: user.emoji,
-        content,
-        messageType: 'text',
-        replyToId: replyTo?.id || null,
-      }),
-    });
-
-    setSending(false);
+      const data = await response.json();
+      if (data.success && data.message) {
+        // Optimistically update UI if not already added by socket/realtime
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === data.message.id)) return prev;
+          return [...prev, data.message];
+        });
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -630,20 +669,7 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
         if (fileMetadata.mimeType.startsWith('image/')) messageType = 'image';
         else if (fileMetadata.mimeType.startsWith('video/')) messageType = 'video';
 
-        if (socket) {
-          socket.emit('send_message', {
-            senderId: user.id,
-            senderName: user.name,
-            senderEmoji: user.emoji,
-            content: null,
-            messageType,
-            fileId: fileMetadata.id,
-            fileUrl: fileMetadata.storagePath,
-            fileName: fileMetadata.originalName,
-          });
-        }
-
-        await fetch('/api/messages/save', {
+        const response = await fetch('/api/messages/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -656,6 +682,14 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
             fileName: fileMetadata.originalName,
           }),
         });
+
+        const dataSave = await response.json();
+        if (dataSave.success && dataSave.message) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === dataSave.message.id)) return prev;
+            return [...prev, dataSave.message];
+          });
+        }
       }
     } catch (err) {
       console.error('File upload error:', err);
@@ -711,18 +745,7 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
       const data = await response.json();
 
       if (data.success && data.file) {
-        socket.emit('send_message', {
-          senderId: user.id,
-          senderName: user.name,
-          senderEmoji: user.emoji,
-          content: null,
-          messageType: 'voice',
-          fileId: data.file.id,
-          fileUrl: data.file.storagePath,
-          voiceDuration: duration,
-        });
-
-        await fetch('/api/messages/save', {
+        const response = await fetch('/api/messages/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -735,6 +758,14 @@ const socketInstance = io("https://mose-1n7m.onrender.com", {
             voiceDuration: duration,
           }),
         });
+
+        const dataSave = await response.json();
+        if (dataSave.success && dataSave.message) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === dataSave.message.id)) return prev;
+            return [...prev, dataSave.message];
+          });
+        }
       }
     } catch (err) {
       console.error('Voice upload error:', err);

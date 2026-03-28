@@ -84,11 +84,31 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  // API endpoint for broadcasting messages from Vercel/Supabase
+  if (cleanUrl === '/api/broadcast' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      try {
+        const message = JSON.parse(body);
+        console.log(`📡 External broadcast: ${message.senderName}: ${message.content || '(file)'}`);
+        io.emit('message', message);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid message data' }));
+      }
+    });
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not Found');
 });
 
-const io = new Server(httpServer, {
+// Create Socket.IO server attached to HTTP server
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
     // Exact match for your Vercel app
     origin: ["https://wiki-captcha.vercel.app", "http://localhost:3000"],
@@ -96,16 +116,6 @@ const io = new Server(httpServer, {
     credentials: true,
   },
   transports: ['websocket', 'polling'],
-});
-
-
-// Create Socket.IO server attached to HTTP server
-const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-  cors: {
-    origin: ["https://wiki-captcha.vercel.app", "http://localhost:3000"],
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
 });
 
 // Store connected users (max 2 users for private chat)
