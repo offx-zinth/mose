@@ -7,9 +7,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://postgres:MoshikaSenthil2026@db.mvprnkoufuoelqlzsgaq.supabase.co:5432/postgres?pgbouncer=true"
-
+  url      = "postgres://postgres.mvprnkoufuoelqlzsgaq:MoshikaSenthil2026@://aws-0-us-east-1.pooler.supabase.com"
 }
+
 
 // Message model for storing chat messages
 model Message {
