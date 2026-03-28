@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName, replyToId, voiceDuration } = await request.json();
+    const { senderId, senderName, senderEmoji, content, messageType, fileId, fileUrl, fileName, replyToId } = await request.json();
 
     if (!senderId || !messageType) {
       return NextResponse.json(
@@ -48,7 +48,6 @@ export async function POST(request: NextRequest) {
         fileUrl: fileUrl || null,
         fileName: fileName || null,
         replyToId: replyToId || null,
-        voiceDuration: voiceDuration || null,
         seen: false,
         isEdited: false,
       },
@@ -75,7 +74,6 @@ export async function POST(request: NextRequest) {
       replyToEmoji: parentMessage?.senderEmoji || null,
       isEdited: message.isEdited,
       editedAt: message.editedAt?.toISOString() || null,
-      voiceDuration: message.voiceDuration,
       reactions: [],
     };
 

@@ -49,7 +49,6 @@ export async function GET(request: NextRequest) {
       replyToEmoji: msg.replyTo?.senderEmoji || null,
       isEdited: msg.isEdited,
       editedAt: msg.editedAt?.toISOString() || null,
-      voiceDuration: msg.voiceDuration,
       reactions: msg.reactions.map(r => ({
         id: r.id,
         messageId: r.messageId,
