@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-cormorant: var(--font-cormorant);
+  --font-great-vibes: var(--font-great-vibes);
+}
+
+body {
+  background: #120804;
+  color: #3d2314;
+  font-family: var(--font-cormorant), serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom scrollbar for the letter */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(139, 90, 43, 0.5);
+  border-radius: 20px;
+}
